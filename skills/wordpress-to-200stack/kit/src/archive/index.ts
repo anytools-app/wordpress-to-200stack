@@ -1,4 +1,4 @@
-import { mkdir, writeFile } from "node:fs/promises";
+import { access, mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import { load as loadHtml } from "cheerio";
@@ -21,6 +21,7 @@ export type ArchivePageMeta = {
   forms: Array<{ action: string; method: string; inputs: string[] }>;
 };
 type ArchivedPage = { response: FetchResponse; html?: string; meta: ArchivePageMeta; screenshots: boolean };
+export type ArchiveWarning = { url: string; type: "screenshot-timeout" | "screenshot-failed"; message: string };
 export type ArchiveOptions = {
   origin: string;
   archiveDir?: string;
@@ -30,10 +31,19 @@ export type ArchiveOptions = {
   limit?: number;
   fetchImpl?: typeof fetch;
   requestDelayMs?: number;
+  resume?: boolean;
+  screenshotTimeout?: number;
 };
-export type ArchiveResult = { archiveDir: string; pages: Array<{ url: string; status: number; title?: string; screenshots: boolean }>; forms: Array<{ endpoint: string; pages: string[] }> };
+export type ArchiveResult = { archiveDir: string; pages: Array<{ url: string; status: number; title?: string; screenshots: boolean }>; forms: Array<{ endpoint: string; pages: string[] }>; skipped: number; screenshotFailed: number; assetExcluded: number; warnings: ArchiveWarning[] };
 
 function delay(milliseconds: number): Promise<void> { return new Promise((resolve) => setTimeout(resolve, milliseconds)); }
+const ASSET_EXTENSION = /\.(?:avif|bmp|css|eot|gif|ico|jpe?g|js|map|m4a|m4v|mov|mp3|mp4|og[gv]|pdf|png|svg|tar|tgz|ttf|wav|webm|webp|woff2?|xz|zip)$/i;
+function isAssetUrl(value: string, origin: URL): string | undefined {
+  try {
+    const url = new URL(value, origin);
+    return url.origin === origin.origin && ASSET_EXTENSION.test(url.pathname) ? url.toString() : undefined;
+  } catch { return undefined; }
+}
 function cleanUrl(value: string, origin: URL): string | undefined {
   try {
     const url = new URL(value, origin);
@@ -63,12 +73,15 @@ function selectorContent($: ReturnType<typeof loadHtml>, selector: string): stri
   const content = $(selector).first().attr("content");
   return content?.trim() || undefined;
 }
-function pageMeta(response: FetchResponse, origin: URL): ArchivePageMeta {
+function pageMeta(response: FetchResponse, origin: URL, assetExcluded: Set<string>): ArchivePageMeta {
   const html = response.body.toString("utf8");
   const $ = loadHtml(html);
   const internalLinks = new Set<string>();
   $("a[href]").each((_index, element) => {
-    const found = cleanUrl($(element).attr("href") ?? "", origin);
+    const href = $(element).attr("href") ?? "";
+    const asset = isAssetUrl(href, origin);
+    if (asset) { assetExcluded.add(asset); return; }
+    const found = cleanUrl(href, origin);
     if (found) internalLinks.add(found);
   });
   const forms: ArchivePageMeta["forms"] = [];
@@ -167,24 +180,71 @@ async function saveAssets(assetUrls: string[], archiveDir: string, request: (url
   })));
 }
 
-async function takeScreenshots(pages: ArchivedPage[], archiveDir: string): Promise<void> {
-  const browser = await chromium.launch({ headless: true });
+export async function withTimeout<T>(work: () => Promise<T>, timeoutMs: number): Promise<T> {
+  let timer: NodeJS.Timeout | undefined;
   try {
-    for (const page of pages) {
+    return await Promise.race([
+      work(),
+      new Promise<T>((_resolve, reject) => { timer = setTimeout(() => reject(new Error(`screenshot timed out after ${timeoutMs}ms`)), timeoutMs); }),
+    ]);
+  } finally { if (timer) clearTimeout(timer); }
+}
+
+async function takeScreenshots(pages: ArchivedPage[], archiveDir: string, timeoutMs: number, warnings: ArchiveWarning[]): Promise<number> {
+  const browser = await chromium.launch({ headless: true });
+  let failed = 0;
+  try {
+    for (let index = 0; index < pages.length; index += 50) {
+      const context = await browser.newContext();
+      try { for (const page of pages.slice(index, index + 50)) {
       if (page.response.status < 200 || page.response.status >= 400) continue;
       const target = page.response.finalUrl;
       const directory = pageDirectory(join(archiveDir, "pages"), page.response.requestedUrl);
       try {
-        for (const [name, viewport] of [["desktop", { width: 1280, height: 800 }], ["mobile", { width: 375, height: 812 }]] as const) {
-          const browserPage = await browser.newPage({ viewport });
-          await browserPage.goto(target, { waitUntil: "networkidle" });
-          await browserPage.screenshot({ path: join(directory, `${name}.png`), fullPage: true });
-          await browserPage.close();
-        }
+        await withTimeout(async () => {
+          const browserPages = [] as Array<Awaited<ReturnType<typeof context.newPage>>>;
+          try { for (const [name, viewport] of [["desktop", { width: 1280, height: 800 }], ["mobile", { width: 375, height: 812 }]] as const) {
+            const browserPage = await context.newPage(); browserPages.push(browserPage);
+            await browserPage.setViewportSize(viewport);
+            await browserPage.goto(target, { waitUntil: "networkidle" });
+            await browserPage.screenshot({ path: join(directory, `${name}.png`), fullPage: true });
+          } } finally { await Promise.all(browserPages.map((browserPage) => browserPage.close().catch(() => undefined))); }
+        }, timeoutMs);
         page.screenshots = true;
-      } catch { page.screenshots = false; }
+      } catch (error: unknown) {
+        page.screenshots = false; failed += 1;
+        const timedOut = error instanceof Error && error.message.startsWith("screenshot timed out after");
+        const message = error instanceof Error ? error.message : String(error);
+        warnings.push({ url: page.meta.url, type: timedOut ? "screenshot-timeout" : "screenshot-failed", message });
+        console.error(`warning: screenshot ${timedOut ? "timed out" : "failed"} for ${page.meta.url}: ${message}`);
+      }
+      } } finally { await context.close(); }
     }
   } finally { await browser.close(); }
+  return failed;
+}
+
+type InventoryEntry = { url: string; status: number; title?: string; screenshots?: boolean };
+type PreviousInventory = { urls: InventoryEntry[]; forms: Array<{ endpoint: string; pages: string[] }>; warnings: ArchiveWarning[] };
+async function readPreviousInventory(archiveDir: string): Promise<PreviousInventory> {
+  try {
+    const inventory = JSON.parse(await readFile(join(archiveDir, "inventory.json"), "utf8")) as { urls?: InventoryEntry[]; pages?: InventoryEntry[]; forms?: PreviousInventory["forms"]; warnings?: ArchiveWarning[] };
+    return { urls: inventory.urls ?? inventory.pages ?? [], forms: inventory.forms ?? [], warnings: inventory.warnings ?? [] };
+  } catch { return { urls: [], forms: [], warnings: [] }; }
+}
+async function exists(path: string): Promise<boolean> { try { await access(path); return true; } catch { return false; } }
+async function existingPage(archiveDir: string, url: string, fallback: InventoryEntry): Promise<ArchivedPage | undefined> {
+  const directory = pageDirectory(join(archiveDir, "pages"), url);
+  if (!await exists(join(directory, "page.html"))) return undefined;
+  const html = await readFile(join(directory, "page.html"), "utf8");
+  const screenshots = await exists(join(directory, "desktop.png")) && await exists(join(directory, "mobile.png"));
+  try {
+    const meta = JSON.parse(await readFile(join(directory, "meta.json"), "utf8")) as ArchivePageMeta;
+    return { response: { requestedUrl: url, finalUrl: meta.finalUrl ?? url, status: meta.status ?? fallback.status, headers: new Headers(), body: Buffer.alloc(0), redirects: meta.redirects ?? [] }, html, meta, screenshots };
+  } catch {
+    const meta: ArchivePageMeta = { url, finalUrl: url, status: fallback.status, redirects: [], og: {}, internalLinks: [], forms: [] };
+    return { response: { requestedUrl: url, finalUrl: url, status: fallback.status, headers: new Headers(), body: Buffer.alloc(0), redirects: [] }, html, meta, screenshots };
+  }
 }
 
 export async function archiveSite(options: ArchiveOptions): Promise<ArchiveResult> {
@@ -192,8 +252,14 @@ export async function archiveSite(options: ArchiveOptions): Promise<ArchiveResul
   const archiveDir = options.archiveDir ?? "./archive";
   const maxPages = options.maxPages ?? 2000;
   const concurrency = Math.max(1, options.concurrency ?? 4);
+  const screenshotTimeoutMs = Math.max(1, options.screenshotTimeout ?? 30) * 1000;
   const request = createRequester(options.fetchImpl ?? fetch, options.requestDelayMs ?? 100);
   await mkdir(join(archiveDir, "pages"), { recursive: true });
+  const previous = options.resume ? await readPreviousInventory(archiveDir) : { urls: [], forms: [], warnings: [] };
+  const previousByUrl = new Map(previous.urls.map((page) => [page.url, page]));
+  const assetExcluded = new Set<string>();
+  const warnings: ArchiveWarning[] = [];
+  let skipped = 0;
   const sitemapSeen = new Set<string>();
   const sitemapUrls: string[] = [];
   const visitSitemap = async (url: string): Promise<void> => {
@@ -207,25 +273,39 @@ export async function archiveSite(options: ArchiveOptions): Promise<ArchiveResul
         try { found = new URL(location, response.finalUrl); } catch { continue; }
         if (found.origin !== origin.origin) continue;
         if (found.pathname.endsWith(".xml")) await visitSitemap(found.toString());
-        else { const clean = cleanUrl(found.toString(), origin); if (clean) sitemapUrls.push(clean); }
+        else {
+          const asset = isAssetUrl(found.toString(), origin);
+          if (asset) assetExcluded.add(asset);
+          else { const clean = cleanUrl(found.toString(), origin); if (clean) sitemapUrls.push(clean); }
+        }
       }
     } catch { /* sitemap is optional */ }
   };
   await visitSitemap(new URL("/sitemap.xml", origin).toString());
-  const queue = [...new Set([origin.toString(), ...sitemapUrls])];
+  const queue = [...new Set([origin.toString(), ...sitemapUrls, ...previous.urls.map((page) => page.url)])];
   const queued = new Set(queue);
   const pages: ArchivedPage[] = [];
   for (let index = 0; index < queue.length && pages.length < maxPages;) {
     const batch = queue.slice(index, index + Math.min(concurrency, maxPages - pages.length));
     index += batch.length;
     const fetched = await Promise.all(batch.map(async (url) => {
+      const prior = previousByUrl.get(url) ?? { url, status: 200 };
+      if (options.resume) {
+        const page = await existingPage(archiveDir, url, prior);
+        if (page) {
+          if (page.screenshots) skipped += 1;
+          return page;
+        }
+      }
       try { return await request(url); } catch { return undefined; }
     }));
-    for (const response of fetched) {
-      if (!response) continue;
+    for (const item of fetched) {
+      if (!item) continue;
+      if ("response" in item) { pages.push(item); continue; }
+      const response = item;
       const contentType = response.headers.get("content-type") ?? "";
       const html = /text\/html|application\/xhtml\+xml/i.test(contentType) ? response.body.toString("utf8") : undefined;
-      const meta = pageMeta(response, origin);
+      const meta = pageMeta(response, origin, assetExcluded);
       pages.push({ response, html, meta, screenshots: false });
       if (html && response.status >= 200 && response.status < 400) for (const link of meta.internalLinks) {
         if (!queued.has(link) && queued.size < maxPages) { queued.add(link); queue.push(link); }
@@ -237,14 +317,14 @@ export async function archiveSite(options: ArchiveOptions): Promise<ArchiveResul
   for (const page of archivedPages) {
     const directory = pageDirectory(join(archiveDir, "pages"), page.response.requestedUrl);
     await mkdir(directory, { recursive: true });
-    if (page.html !== undefined) {
+    if (page.html !== undefined && !(options.resume && await exists(join(directory, "page.html")))) {
       await writeFile(join(directory, "page.html"), page.html);
       for (const asset of assetsInHtml(page.html, page.response.finalUrl)) assetUrls.add(asset);
     }
-    await writeFile(join(directory, "meta.json"), `${JSON.stringify(page.meta, null, 2)}\n`);
+    if (!(options.resume && await exists(join(directory, "meta.json")))) await writeFile(join(directory, "meta.json"), `${JSON.stringify(page.meta, null, 2)}\n`);
   }
   await saveAssets([...assetUrls], archiveDir, request, concurrency);
-  if (options.screenshots ?? true) await takeScreenshots(archivedPages, archiveDir);
+  const screenshotFailed = options.screenshots ?? true ? await takeScreenshots(archivedPages.filter((page) => !page.screenshots), archiveDir, screenshotTimeoutMs, warnings) : 0;
   const formsByEndpoint = new Map<string, Set<string>>();
   for (const page of archivedPages) for (const form of page.meta.forms) {
     try { if (new URL(form.action).origin === origin.origin) continue; }
@@ -252,11 +332,20 @@ export async function archiveSite(options: ArchiveOptions): Promise<ArchiveResul
     const matching = formsByEndpoint.get(form.action) ?? new Set<string>();
     matching.add(page.meta.url); formsByEndpoint.set(form.action, matching);
   }
+  for (const form of previous.forms) {
+    const sourcePages = formsByEndpoint.get(form.endpoint) ?? new Set<string>();
+    for (const page of form.pages) sourcePages.add(page);
+    formsByEndpoint.set(form.endpoint, sourcePages);
+  }
   const forms = [...formsByEndpoint.entries()].sort(([left], [right]) => left.localeCompare(right)).map(([endpoint, sourcePages]) => ({ endpoint, pages: [...sourcePages].sort() }));
-  const inventory = { urls: archivedPages.map((page) => ({ url: page.meta.url, status: page.meta.status, ...(page.meta.title ? { title: page.meta.title } : {}), screenshots: page.screenshots })), forms };
+  const currentUrls = archivedPages.map((page) => ({ url: page.meta.url, status: page.meta.status, ...(page.meta.title ? { title: page.meta.title } : {}), screenshots: page.screenshots }));
+  const urls = [...new Map([...previous.urls.map((page) => ({ ...page, screenshots: page.screenshots ?? false })), ...currentUrls].map((page) => [page.url, page])).values()].sort((left, right) => left.url.localeCompare(right.url));
+  const completedUrls = new Set(currentUrls.filter((page) => page.screenshots).map((page) => page.url));
+  const inventoryWarnings = [...previous.warnings.filter((warning) => !completedUrls.has(warning.url)), ...warnings];
+  const inventory = { urls, forms, warnings: inventoryWarnings, summary: { skipped, screenshotFailed, assetExcluded: assetExcluded.size } };
   await Promise.all([
     writeFile(join(archiveDir, "inventory.json"), `${JSON.stringify(inventory, null, 2)}\n`),
     writeFile(join(archiveDir, "forms.json"), `${JSON.stringify(forms, null, 2)}\n`),
   ]);
-  return { archiveDir, pages: inventory.urls, forms };
+  return { archiveDir, pages: inventory.urls, forms: inventory.forms, skipped, screenshotFailed, assetExcluded: assetExcluded.size, warnings };
 }

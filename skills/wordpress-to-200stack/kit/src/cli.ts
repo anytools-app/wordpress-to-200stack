@@ -121,9 +121,11 @@ program
   .option("--limit <count>", "process only the first N collected URLs", count)
   .option("--screenshots", "enable Playwright screenshots", true)
   .option("--no-screenshots", "disable Playwright screenshots")
-  .action(async (origin: string, options: { outDir: string; maxPages: number; concurrency: number; limit?: number; screenshots: boolean }) => {
-    const result = await archiveSite({ origin, archiveDir: options.outDir, maxPages: options.maxPages, concurrency: options.concurrency, limit: options.limit, screenshots: options.screenshots });
-    console.log(JSON.stringify({ pages: result.pages.length, forms: result.forms.length, archiveDir: result.archiveDir }));
+  .option("--resume", "reuse existing archived HTML and completed screenshots")
+  .option("--screenshot-timeout <sec>", "timeout per page for desktop and mobile screenshots", positiveCount, 30)
+  .action(async (origin: string, options: { outDir: string; maxPages: number; concurrency: number; limit?: number; screenshots: boolean; resume?: boolean; screenshotTimeout: number }) => {
+    const result = await archiveSite({ origin, archiveDir: options.outDir, maxPages: options.maxPages, concurrency: options.concurrency, limit: options.limit, screenshots: options.screenshots, resume: options.resume, screenshotTimeout: options.screenshotTimeout });
+    console.log(JSON.stringify({ pages: result.pages.length, forms: result.forms.length, skipped: result.skipped, screenshotFailed: result.screenshotFailed, assetExcluded: result.assetExcluded, archiveDir: result.archiveDir }));
   });
 
 program
