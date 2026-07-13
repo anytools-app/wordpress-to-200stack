@@ -1,0 +1,117 @@
+import { readFile } from "node:fs/promises";
+import { fileURLToPath } from "node:url";
+
+import { describe, expect, it } from "vitest";
+
+import mapping from "./fixtures/mini-mapping.config.js";
+import { defineMigration } from "../src/config.js";
+import { parseMigration } from "../src/parse/index.js";
+
+const fixturePath = fileURLToPath(new URL("./fixtures/mini-wxr.xml", import.meta.url));
+
+async function parse(xmlTransform?: (xml: string) => string, config = mapping) {
+  const xml = await readFile(fixturePath, "utf8");
+  return parseMigration(config, xmlTransform ? xmlTransform(xml) : xml);
+}
+
+describe("wpkit parse", () => {
+  it("normalizes decoded NFC routes and keeps trailing-slash data", async () => {
+    const result = await parse((xml) => xml.replace("%e3%82%a2%e3%82%af%e3%83%a1/", "cafe%CC%81/"));
+    expect(result.routes.find((route) => route.wpId === 10)).toMatchObject({ path: "/cars/café", segments: ["cars", "café"], trailingSlash: true });
+  });
+
+  it("creates typed fields and repeaters while retaining empty zip rows", async () => {
+    const result = await parse();
+    const car = result.documents.find((document) => document.source.wpId === 10);
+    expect(car?.fields).toEqual({ price: 1230000, tags: ["classic", "acme"] });
+    expect(car?.repeaters.gallery).toEqual([
+      { image: "1", caption: "caption 1" },
+      { image: "2", caption: "" },
+      { image: "3", caption: "caption 3" },
+    ]);
+    expect(result.validation.errors).toEqual([]);
+  });
+
+  it("reports a repeater zip mismatch and a normalized route collision", async () => {
+    const mismatch = await parse((xml) => xml.replace('<wp:postmeta><wp:meta_key>caption</wp:meta_key><wp:meta_value>caption 3</wp:meta_value></wp:postmeta>', ""));
+    expect(mismatch.validation.errors.some((entry) => entry.code === "repeaterColumnCountMismatch")).toBe(true);
+    const collision = await parse((xml) => xml.replace("<title>About</title><link>https://example.test/about/", "<title>About</title><link>https://example.test/cars/%e3%82%a2%e3%82%af%e3%83%a1/"));
+    expect(collision.validation.errors.some((entry) => entry.code === "routeCollision")).toBe(true);
+  });
+
+  it("rewrites upload assets and strips only unsafe HTML", async () => {
+    const car = (await parse()).documents.find((document) => document.source.wpId === 10);
+    expect(car?.content.legacyBodyHtml).toContain('src="https://media.example.test/wp-content/uploads/a.jpg"');
+    expect(car?.content.legacyBodyHtml).toContain('srcset="https://media.example.test/wp-content/uploads/a.jpg 1x, https://media.example.test/wp-content/uploads/a-2.jpg 2x"');
+    expect(car?.content.legacyBodyHtml).toContain('loading="lazy"');
+    expect(car?.content.legacyBodyHtml).toContain("<table><tr><td>x</td></tr></table>");
+    expect(car?.content.legacyBodyHtml).not.toMatch(/script|video\.example|onclick/);
+    expect(car?.assets).toEqual([
+      "https://example.test/wp-content/uploads/a-2.jpg",
+      "https://example.test/wp-content/uploads/a.jpg",
+      "https://example.test/wp-content/uploads/a.pdf",
+    ]);
+  });
+
+  it("resolves attachment IDs in image fields and records the original asset", async () => {
+    const carApi = mapping.apis.cars!;
+    const imageMapping = defineMigration({
+      ...mapping,
+      apis: {
+        ...mapping.apis,
+        cars: { ...carApi, fields: [...carApi.fields, { metaKey: "image", fieldId: "hero", type: "image" }] },
+      },
+    });
+    const result = await parse((xml) => xml.replace('<wp:meta_key>image</wp:meta_key><wp:meta_value>1</wp:meta_value>', '<wp:meta_key>image</wp:meta_key><wp:meta_value>40</wp:meta_value>'), imageMapping);
+    const car = result.documents.find((document) => document.source.wpId === 10);
+    expect(car?.fields.hero).toBe("https://media.example.test/wp-content/uploads/a.jpg");
+    expect(car?.assets).toContain("https://example.test/wp-content/uploads/a.jpg");
+    expect(result.validation.warnings.some((entry) => entry.code === "imageAttachmentMissing")).toBe(false);
+  });
+
+  it("skips zero relations and accepts code-implemented page routes", async () => {
+    const withCodePages = defineMigration({ ...mapping, linkCheck: { assumeExistPostTypes: ["page"] } });
+    const result = await parse((xml) => xml.replace('<wp:postmeta><wp:meta_key>related</wp:meta_key><wp:meta_value>999</wp:meta_value></wp:postmeta>', '<wp:postmeta><wp:meta_key>related</wp:meta_key><wp:meta_value>999</wp:meta_value></wp:postmeta><wp:postmeta><wp:meta_key>related</wp:meta_key><wp:meta_value>0</wp:meta_value></wp:postmeta>'), withCodePages);
+    const car = result.documents.find((document) => document.source.wpId === 10);
+    expect(car?.relations.some((relation) => relation.targetWpId === 0)).toBe(false);
+    expect(result.validation.warnings.filter((entry) => entry.code === "unresolvedInternalLink")).toEqual([
+      expect.objectContaining({ details: { url: "/not-in-ledger/" }, count: 1 }),
+    ]);
+  });
+
+  it("accepts configured exact link-check paths without treating prefixes as matches", async () => {
+    const explicitPath = defineMigration({ ...mapping, linkCheck: { assumeExistPaths: ["/not-in-ledger"] } });
+    const result = await parse(undefined, explicitPath);
+    const urls = result.validation.warnings.filter((entry) => entry.code === "unresolvedInternalLink").map((entry) => (entry.details as { url?: string } | undefined)?.url);
+    expect(urls).not.toContain("/not-in-ledger/");
+    const prefixOnly = defineMigration({ ...mapping, linkCheck: { assumeExistPaths: ["/not-in"] } });
+    const prefixUrls = (await parse(undefined, prefixOnly)).validation.warnings.filter((entry) => entry.code === "unresolvedInternalLink").map((entry) => (entry.details as { url?: string } | undefined)?.url);
+    expect(prefixUrls).toContain("/not-in-ledger/");
+  });
+
+  it("resolves relations, reports unresolved targets, restores derived sizes, and is deterministic", async () => {
+    const first = await parse();
+    const second = await parse();
+    const car = first.documents.find((document) => document.source.wpId === 10);
+    expect(car?.relations).toEqual([
+      { fieldId: "related", toApi: "pages", targetWpId: 20, targetContentId: "pages-20" },
+      { fieldId: "related", toApi: "pages", targetWpId: 999 },
+    ]);
+    expect(first.relations.unresolved).toEqual([{ fieldId: "related", toApi: "pages", targetWpId: 999, reason: "targetMissing" }]);
+    expect(first.validation.warnings.some((entry) => entry.code === "unresolvedRelation")).toBe(true);
+    expect(first.attachments[0]?.derivedSizes).toEqual([{ name: "thumb", file: "a-150x150.jpg", width: 150, height: 150 }]);
+    expect(car?.payloadChecksum).toBe(second.documents.find((document) => document.source.wpId === 10)?.payloadChecksum);
+  });
+
+  it("marks relations to excluded WXR items separately", async () => {
+    const result = await parse((xml) => xml.replace('<wp:meta_key>related</wp:meta_key><wp:meta_value>999</wp:meta_value>', '<wp:meta_key>related</wp:meta_key><wp:meta_value>11</wp:meta_value>'));
+    expect(result.relations.unresolved).toContainEqual(expect.objectContaining({ targetWpId: 11, reason: "targetExcluded" }));
+  });
+
+  it("rejects invalid mapping configs with an editable key path", () => {
+    expect(() => defineMigration({
+      ...mapping,
+      apis: { merged: { from: ["car", "page"], fields: [] } },
+    })).toThrow(/apis\.merged\.kindField/);
+  });
+});

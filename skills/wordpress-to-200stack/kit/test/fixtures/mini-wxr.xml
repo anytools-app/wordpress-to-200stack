@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<rss version="2.0" xmlns:content="http://purl.org/rss/1.0/modules/content/" xmlns:excerpt="http://wordpress.org/export/1.2/excerpt/" xmlns:wp="http://wordpress.org/export/1.2/">
+  <channel>
+    <title>Mini site</title>
+    <generator>https://wordpress.org/?v=6.4.3</generator>
+    <wp:base_blog_url>https://example.test</wp:base_blog_url>
+    <wp:author><wp:author_id>7</wp:author_id><wp:author_login><![CDATA[editor]]></wp:author_login><wp:author_display_name><![CDATA[Editor]]></wp:author_display_name></wp:author>
+    <item>
+      <title><![CDATA[First car]]></title><link>https://example.test/cars/%e3%82%a2%e3%82%af%e3%83%a1/</link>
+      <content:encoded><![CDATA[<iframe src="https://www.youtube.com/embed/1"></iframe><iframe src="https://video.example/embed/1"></iframe><script src="https://cdn.example/a.js"></script><script>window.x = 1</script><table><tr><td>x</td></tr></table><img src="https://example.test/wp-content/uploads/a.jpg" srcset="https://example.test/wp-content/uploads/a.jpg 1x, https://example.test/wp-content/uploads/a-2.jpg 2x" onclick="bad()"><a href="https://example.test/about/">About</a><a href="/not-in-ledger/">Missing</a><a href="https://example.test/wp-content/uploads/a.pdf">PDF</a>badtext]]></content:encoded>
+      <excerpt:encoded><![CDATA[Excerpt]]></excerpt:encoded><wp:post_id>10</wp:post_id><wp:post_date_gmt><![CDATA[2020-01-01 00:00:00]]></wp:post_date_gmt><wp:post_name><![CDATA[%e3%82%a2%e3%82%af%e3%83%a1]]></wp:post_name><wp:status>publish</wp:status><wp:post_parent>0</wp:post_parent><wp:post_type>car</wp:post_type>
+      <category domain="brand" nicename="acme"><![CDATA[Acme]]></category>
+      <wp:postmeta><wp:meta_key>image</wp:meta_key><wp:meta_value>1</wp:meta_value></wp:postmeta>
+      <wp:postmeta><wp:meta_key>image</wp:meta_key><wp:meta_value>2</wp:meta_value></wp:postmeta>
+      <wp:postmeta><wp:meta_key>image</wp:meta_key><wp:meta_value>3</wp:meta_value></wp:postmeta>
+      <wp:postmeta><wp:meta_key>caption</wp:meta_key><wp:meta_value>caption 1</wp:meta_value></wp:postmeta>
+      <wp:postmeta><wp:meta_key>caption</wp:meta_key><wp:meta_value></wp:meta_value></wp:postmeta>
+      <wp:postmeta><wp:meta_key>caption</wp:meta_key><wp:meta_value>caption 3</wp:meta_value></wp:postmeta>
+      <wp:postmeta><wp:meta_key>price</wp:meta_key><wp:meta_value>１，２３０，０００</wp:meta_value></wp:postmeta>
+      <wp:postmeta><wp:meta_key>tag</wp:meta_key><wp:meta_value>classic</wp:meta_value></wp:postmeta>
+      <wp:postmeta><wp:meta_key>tag</wp:meta_key><wp:meta_value>acme</wp:meta_value></wp:postmeta>
+      <wp:postmeta><wp:meta_key>related</wp:meta_key><wp:meta_value>20</wp:meta_value></wp:postmeta>
+      <wp:postmeta><wp:meta_key>related</wp:meta_key><wp:meta_value>999</wp:meta_value></wp:postmeta>
+      <wp:postmeta><wp:meta_key>custom_permalink</wp:meta_key><wp:meta_value>/special-car</wp:meta_value></wp:postmeta>
+      <wp:postmeta><wp:meta_key>_thumbnail_id</wp:meta_key><wp:meta_value>40</wp:meta_value></wp:postmeta>
+      <wp:postmeta><wp:meta_key>_yoast_wpseo_title</wp:meta_key><wp:meta_value>Car %%sep%% %%sitename%%</wp:meta_value></wp:postmeta>
+      <wp:postmeta><wp:meta_key>_yoast_wpseo_metadesc</wp:meta_key><wp:meta_value>SEO description</wp:meta_value></wp:postmeta>
+      <wp:postmeta><wp:meta_key>_yoast_wpseo_meta-robots-noindex</wp:meta_key><wp:meta_value>1</wp:meta_value></wp:postmeta>
+    </item>
+    <item>
+      <title>Second car</title><link>https://example.test/cars/second</link><content:encoded><![CDATA[<p>plain</p>]]></content:encoded><excerpt:encoded></excerpt:encoded><wp:post_id>11</wp:post_id><wp:post_date_gmt>0000-00-00 00:00:00</wp:post_date_gmt><wp:post_name>second</wp:post_name><wp:status>draft</wp:status><wp:post_parent>0</wp:post_parent><wp:post_type>car</wp:post_type>
+    </item>
+    <item>
+      <title>About</title><link>https://example.test/about/</link><content:encoded><![CDATA[<p>About</p>]]></content:encoded><excerpt:encoded></excerpt:encoded><wp:post_id>20</wp:post_id><wp:post_date_gmt></wp:post_date_gmt><wp:post_name>about</wp:post_name><wp:status>publish</wp:status><wp:post_parent>0</wp:post_parent><wp:post_type>page</wp:post_type>
+    </item>
+    <item>
+      <title>Car fields</title><link>https://example.test/smart-custom-fields/car-fields</link><content:encoded></content:encoded><excerpt:encoded></excerpt:encoded><wp:post_id>30</wp:post_id><wp:post_date_gmt></wp:post_date_gmt><wp:post_name>car-fields</wp:post_name><wp:status>publish</wp:status><wp:post_parent>0</wp:post_parent><wp:post_type>smart-custom-fields</wp:post_type>
+      <wp:postmeta><wp:meta_key>smart-cf-setting</wp:meta_key><wp:meta_value><![CDATA[a:1:{i:0;a:3:{s:10:"group-name";s:7:"gallery";s:6:"repeat";b:1;s:6:"fields";a:2:{i:0;a:4:{s:4:"name";s:5:"image";s:4:"type";s:5:"image";s:5:"label";s:5:"Image";s:7:"choices";s:25:"受付中
+受付を終了";}i:1;a:3:{s:4:"name";s:7:"caption";s:4:"type";s:4:"text";s:5:"label";s:7:"Caption";}}}}]]></wp:meta_value></wp:postmeta>
+      <wp:postmeta><wp:meta_key>smart-cf-condition</wp:meta_key><wp:meta_value><![CDATA[a:1:{i:0;s:3:"car";}]]></wp:meta_value></wp:postmeta>
+      <wp:postmeta><wp:meta_key>smart-cf-condition-post-ids</wp:meta_key><wp:meta_value>10, 11</wp:meta_value></wp:postmeta>
+    </item>
+    <item>
+      <title>Image</title><link>https://example.test/wp-content/uploads/a.jpg</link><content:encoded></content:encoded><excerpt:encoded></excerpt:encoded><wp:post_id>40</wp:post_id><wp:post_date_gmt></wp:post_date_gmt><wp:post_name>a</wp:post_name><wp:status>inherit</wp:status><wp:post_parent>10</wp:post_parent><wp:post_type>attachment</wp:post_type><wp:attachment_url>https://example.test/wp-content/uploads/a.jpg</wp:attachment_url>
+      <wp:postmeta><wp:meta_key>_wp_attachment_metadata</wp:meta_key><wp:meta_value><![CDATA[a:1:{s:5:"sizes";a:1:{s:5:"thumb";a:3:{s:4:"file";s:13:"a-150x150.jpg";s:5:"width";i:150;s:6:"height";i:150;}}}]]></wp:meta_value></wp:postmeta>
+    </item>
+  </channel>
+</rss>

@@ -1,0 +1,27 @@
+{
+  "name": "wp-static-kit-next-app",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "npm run build:data && next dev",
+    "build:data": "tsx scripts/build-data.ts",
+    "prebuild": "npm run build:data",
+    "build": "next build",
+    "start": "next start",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "next": "^16.0.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "sanitize-html": "^2.16.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@types/sanitize-html": "^2.16.0",
+    "tsx": "^4.0.0",
+    "typescript": "^5.0.0"
+  }
+}

@@ -1,0 +1,41 @@
+{
+  "name": "wp-static-kit",
+  "version": "0.1.0",
+  "description": "",
+  "main": "index.js",
+  "directories": {
+    "test": "test"
+  },
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "wpkit": "node --import tsx src/cli.ts"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "UNLICENSED",
+  "type": "module",
+  "private": "true",
+  "bin": {
+    "wpkit": "./bin/wpkit.js"
+  },
+  "devDependencies": {
+    "@types/node": "^26.1.1",
+    "@types/pngjs": "^6.0.5",
+    "tsx": "^4.23.0",
+    "typescript": "^7.0.2",
+    "vitest": "^4.1.10"
+  },
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.1085.0",
+    "cheerio": "^1.2.0",
+    "commander": "^15.0.0",
+    "fast-xml-parser": "^5.10.0",
+    "p-limit": "^7.3.0",
+    "php-serialize": "^5.1.3",
+    "pixelmatch": "^7.2.0",
+    "playwright": "^1.61.1",
+    "pngjs": "^7.0.0",
+    "zod": "^4.4.3"
+  }
+}
