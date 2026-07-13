@@ -1,6 +1,11 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
+// Next.js の外(前段スクリプト)でも .env.local / .env を同じ規則で読み込む。
+// これが無いと `npm run dev` 直叩きで WPKIT_IR_DIR 等が渡らない
+import { loadEnvConfig } from "@next/env";
+loadEnvConfig(process.cwd());
+
 import { dataDirectory, irDirectory, readIrDocuments, readIrRoutes, type BuildDataSource } from "../src/lib/manifest";
 import { fetchMicroCmsApis } from "../src/lib/microcms";
 import { hydrateDocuments } from "../src/lib/repository";
