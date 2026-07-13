@@ -119,4 +119,4 @@ npm run wpkit -- verify --old ../_scratch/archive --new ../site/out -o ../_scrat
 
 - 実装委任・レビュー・委任ログは delegate スキルの規約に従う(このスキルは何を委任するかの分割と品質ゲートを規定する)
 - kit に案件固有ロジックを入れない。案件差は mapping.config と site/ 側で吸収
-- 案件で得た WXR・プラグイン固有の癖は `lessons.md` に1行追記(次案件の分析が速くなる)
+- 案件で得た WXR・プラグイン固有の癖は**案件リポジトリ側の `docs/lessons.md`(非公開)**に1行追記する(実測ノウハウはこの公開リポジトリに置かない)
