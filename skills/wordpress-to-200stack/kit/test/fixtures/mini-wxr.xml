@@ -7,7 +7,11 @@
     <wp:author><wp:author_id>7</wp:author_id><wp:author_login><![CDATA[editor]]></wp:author_login><wp:author_display_name><![CDATA[Editor]]></wp:author_display_name></wp:author>
     <item>
       <title><![CDATA[First car]]></title><link>https://example.test/cars/%e3%82%a2%e3%82%af%e3%83%a1/</link>
-      <content:encoded><![CDATA[<iframe src="https://www.youtube.com/embed/1"></iframe><iframe src="https://video.example/embed/1"></iframe><script src="https://cdn.example/a.js"></script><script>window.x = 1</script><table><tr><td>x</td></tr></table><img src="https://example.test/wp-content/uploads/a.jpg" srcset="https://example.test/wp-content/uploads/a.jpg 1x, https://example.test/wp-content/uploads/a-2.jpg 2x" onclick="bad()"><a href="https://example.test/about/">About</a><a href="/not-in-ledger/">Missing</a><a href="https://example.test/wp-content/uploads/a.pdf">PDF</a>badtext]]></content:encoded>
+      <content:encoded><![CDATA[<iframe src="https://www.youtube.com/embed/1"></iframe><iframe src="https://video.example/embed/1"></iframe><script src="https://cdn.example/a.js"></script><script>window.x = 1</script><table><tr><td>x</td></tr></table><p>https://youtu.be/fixture-video</p>
+
+https://youtu.be/raw-fixture-video
+
+<p>https://vimeo.com/missing-video</p><img src="https://example.test/wp-content/uploads/a.jpg" srcset="https://example.test/wp-content/uploads/a.jpg 1x, https://example.test/wp-content/uploads/a-2.jpg 2x" onclick="bad()"><a href="https://example.test/about/">About</a><a href="/not-in-ledger/">Missing</a><a href="https://example.test/wp-content/uploads/a.pdf">PDF</a>badtext]]></content:encoded>
       <excerpt:encoded><![CDATA[Excerpt]]></excerpt:encoded><wp:post_id>10</wp:post_id><wp:post_date_gmt><![CDATA[2020-01-01 00:00:00]]></wp:post_date_gmt><wp:post_name><![CDATA[%e3%82%a2%e3%82%af%e3%83%a1]]></wp:post_name><wp:status>publish</wp:status><wp:post_parent>0</wp:post_parent><wp:post_type>car</wp:post_type>
       <category domain="brand" nicename="acme"><![CDATA[Acme]]></category>
       <wp:postmeta><wp:meta_key>image</wp:meta_key><wp:meta_value>1</wp:meta_value></wp:postmeta>
@@ -26,6 +30,10 @@
       <wp:postmeta><wp:meta_key>_yoast_wpseo_title</wp:meta_key><wp:meta_value>Car %%sep%% %%sitename%%</wp:meta_value></wp:postmeta>
       <wp:postmeta><wp:meta_key>_yoast_wpseo_metadesc</wp:meta_key><wp:meta_value>SEO description</wp:meta_value></wp:postmeta>
       <wp:postmeta><wp:meta_key>_yoast_wpseo_meta-robots-noindex</wp:meta_key><wp:meta_value>1</wp:meta_value></wp:postmeta>
+      <wp:postmeta><wp:meta_key>_oembed_fixture</wp:meta_key><wp:meta_value><![CDATA[<iframe width="500" height="281" src="https://www.youtube.com/embed/fixture-video?feature=oembed"></iframe>]]></wp:meta_value></wp:postmeta>
+      <wp:postmeta><wp:meta_key>_oembed_raw_fixture</wp:meta_key><wp:meta_value><![CDATA[<iframe width="500" height="281" src="https://www.youtube.com/embed/raw-fixture-video?feature=oembed"></iframe>]]></wp:meta_value></wp:postmeta>
+      <wp:postmeta><wp:meta_key>_oembed_time_fixture</wp:meta_key><wp:meta_value>1234567890</wp:meta_value></wp:postmeta>
+      <wp:postmeta><wp:meta_key>_oembed_unknown</wp:meta_key><wp:meta_value>{{unknown}}</wp:meta_value></wp:postmeta>
     </item>
     <item>
       <title>Second car</title><link>https://example.test/cars/second</link><content:encoded><![CDATA[<p>plain</p>]]></content:encoded><excerpt:encoded></excerpt:encoded><wp:post_id>11</wp:post_id><wp:post_date_gmt>0000-00-00 00:00:00</wp:post_date_gmt><wp:post_name>second</wp:post_name><wp:status>draft</wp:status><wp:post_parent>0</wp:post_parent><wp:post_type>car</wp:post_type>

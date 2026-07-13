@@ -11,6 +11,9 @@ import { normalizeRoutePath, rewriteLegacyHtml, type HtmlWarning } from "./html.
 import { metaValues, zipRepeater } from "./repeater.js";
 
 const DEFAULT_IFRAME_HOSTS = ["www.youtube.com", "youtube.com", "player.vimeo.com", "calendar.google.com", "www.google.com", "www.instagram.com"];
+const OEMBED_HOSTS = [
+  "youtube.com", "youtu.be", "vimeo.com", "instagram.com", "instagr.am", "twitter.com", "x.com", "facebook.com", "flickr.com", "soundcloud.com", "spotify.com", "tiktok.com", "wordpress.com", "wordpress.tv",
+];
 
 export type ValidationIssue = { code: string; message: string; wpId?: number; api?: string; details?: unknown; count?: number };
 export type LegacyDocument = {
@@ -41,6 +44,68 @@ export type ParseResult = {
 };
 
 function firstMeta(item: WxrItem, key: string): string | undefined { return metaValues(item, key)[0]; }
+
+type OembedCache = { html: string; urls: string[]; identities: Set<string>; instagram: boolean };
+type OembedExpansion = { html: string; missing: string[]; instagramEmbeds: number };
+
+function decodedHtml(value: string): string { return value.replace(/&amp;/gi, "&"); }
+
+function oembedIdentity(value: string): string | undefined {
+  let url: URL;
+  try { url = new URL(decodedHtml(value)); } catch { return undefined; }
+  const host = url.hostname.toLowerCase().replace(/^www\./, "");
+  const path = url.pathname.split("/").filter(Boolean);
+  if ((host === "youtu.be" && path[0]) || (host === "youtube.com" && ["embed", "shorts", "live"].includes(path[0] ?? "") && path[1])) return `youtube:${host === "youtu.be" ? path[0] : path[1]}`;
+  if (host === "youtube.com" && url.searchParams.get("v")) return `youtube:${url.searchParams.get("v")}`;
+  if (host === "vimeo.com" && path[0]) return `vimeo:${path[0]}`;
+  if (host === "player.vimeo.com" && path[0] === "video" && path[1]) return `vimeo:${path[1]}`;
+  if (["instagram.com", "instagr.am"].includes(host) && ["p", "reel", "tv"].includes(path[0] ?? "") && path[1]) return `instagram:${path[1]}`;
+  return undefined;
+}
+
+function isOembedUrl(value: string): boolean {
+  try {
+    const host = new URL(value).hostname.toLowerCase().replace(/^www\./, "");
+    return OEMBED_HOSTS.some((allowed) => host === allowed || host.endsWith(`.${allowed}`));
+  } catch { return false; }
+}
+
+function oembedCaches(item: WxrItem): OembedCache[] {
+  return item.meta
+    .filter((meta) => /^_oembed_(?!time_)/.test(meta.key) && !/^\s*\{\{unknown\}\}\s*$/i.test(meta.value))
+    .map((meta) => {
+      const html = meta.value;
+      const urls = [...decodedHtml(html).matchAll(/https?:\/\/[^\s"'<>]+/gi)].map((match) => match[0]);
+      return { html, urls, identities: new Set(urls.map(oembedIdentity).filter((identity): identity is string => Boolean(identity))), instagram: /(?:instagram\.com|instagr\.am)/i.test(html) };
+    });
+}
+
+function cacheForOembedUrl(url: string, caches: readonly OembedCache[]): OembedCache | undefined {
+  const identity = oembedIdentity(url);
+  return caches.find((cache) => cache.urls.some((candidate) => candidate === url || decodedHtml(candidate) === decodedHtml(url)))
+    ?? (identity ? caches.find((cache) => cache.identities.has(identity)) : undefined);
+}
+
+/** Reproduce WordPress oEmbed expansion from its exported postmeta cache before sanitizing the result. */
+function expandOembedCache(item: WxrItem): OembedExpansion {
+  const caches = oembedCaches(item);
+  const missing = new Set<string>();
+  let instagramEmbeds = 0;
+  const replaceUrl = (url: string): string | undefined => {
+    if (!isOembedUrl(url)) return undefined;
+    const cache = cacheForOembedUrl(url, caches);
+    if (!cache) { missing.add(url); return undefined; }
+    if (cache.instagram) instagramEmbeds += 1;
+    return cache.html;
+  };
+  // WXR content may retain either WordPress' <p> wrapper or the pre-wpautop blank-line form.
+  let html = item.contentHtml.replace(/<p\b[^>]*>\s*(https?:\/\/[^\s<]+)\s*<\/p>/gi, (whole, url: string) => replaceUrl(url) ?? whole);
+  html = html.replace(/(^|\r?\n\s*\r?\n)(\s*)(https?:\/\/[^\s<]+)(\s*)(?=\r?\n\s*\r?\n|$)/gim, (whole, before: string, leading: string, url: string, trailing: string) => {
+    const replacement = replaceUrl(url);
+    return replacement ? `${before}${leading}${replacement}${trailing}` : whole;
+  });
+  return { html, missing: [...missing].sort(), instagramEmbeds };
+}
 
 function routeFor(item: WxrItem): LegacyDocument["route"] {
   let rawPath = item.link;
@@ -176,6 +241,11 @@ export function parseMigration(config: MigrationConfig, xml: string): ParseResul
   });
   const attachmentsById = new Map(exp.items.filter((item) => item.postType === "attachment").map((item) => [item.wpId, item]));
   const excluded: ParseResult["excluded"] = [];
+  const instagramOembed = exp.items.map((item) => ({ item, expansion: expandOembedCache(item) })).filter(({ expansion }) => expansion.instagramEmbeds > 0);
+  if (instagramOembed.length > 0) {
+    const embeds = instagramOembed.reduce((total, { expansion }) => total + expansion.instagramEmbeds, 0);
+    warnings.push({ code: "instagramOembedMayDiffer", message: `Instagram oEmbed は ${instagramOembed.length} ページ / ${embeds} 件です。embed script は安全上除去されるため、原文と表示が異なる可能性があります`, details: { pages: instagramOembed.length, embeds } });
+  }
   const candidates: Array<{ item: WxrItem; api: string; definition: ApiDef }> = [];
   const configuredMeta = new Map<string, { api: string; key: string }>();
   for (const [api, definition] of Object.entries(config.apis)) {
@@ -213,8 +283,10 @@ export function parseMigration(config: MigrationConfig, xml: string): ParseResul
   const documents: LegacyDocument[] = candidates.map(({ item, api, definition }) => {
     const route = routeFor(item);
     const assets = new Set<string>();
-    const htmlResult = definition.body === "none" ? { html: "", assets: [], warnings: { unresolvedInternalLinks: [], removedScripts: 0, removedIframes: [] } satisfies HtmlWarning } : rewriteLegacyHtml(item.contentHtml, { site: config.site, routePaths: knownRoutePaths, allowIframeHosts });
+    const oembed = expandOembedCache(item);
+    const htmlResult = definition.body === "none" ? { html: "", assets: [], warnings: { unresolvedInternalLinks: [], removedScripts: 0, removedIframes: [] } satisfies HtmlWarning } : rewriteLegacyHtml(oembed.html, { site: config.site, routePaths: knownRoutePaths, allowIframeHosts });
     for (const asset of htmlResult.assets) assets.add(asset);
+    for (const url of oembed.missing) warnings.push({ code: "oembedCacheMissing", wpId: item.wpId, api, message: `oEmbed キャッシュが見つかりません: ${url}`, details: { url } });
     for (const link of htmlResult.warnings.unresolvedInternalLinks) warnings.push({ code: "unresolvedInternalLink", wpId: item.wpId, api, message: `台帳にない内部リンク: ${link}`, details: { url: link } });
     if (htmlResult.warnings.removedScripts > 0) warnings.push({ code: "removedScripts", wpId: item.wpId, api, message: `script を ${htmlResult.warnings.removedScripts} 件除去しました` });
     for (const source of htmlResult.warnings.removedIframes) warnings.push({ code: "removedIframe", wpId: item.wpId, api, message: `許可されない iframe を除去しました: ${source}` });

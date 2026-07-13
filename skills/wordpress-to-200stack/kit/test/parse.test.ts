@@ -53,6 +53,16 @@ describe("wpkit parse", () => {
     ]);
   });
 
+  it("expands cached oEmbed HTML for naked URL paragraphs and warns when the cache is absent", async () => {
+    const car = (await parse()).documents.find((document) => document.source.wpId === 10);
+    const result = await parse();
+    expect(car?.content.legacyBodyHtml).toContain('src="https://www.youtube.com/embed/fixture-video?feature=oembed"');
+    expect(car?.content.legacyBodyHtml).toContain('src="https://www.youtube.com/embed/raw-fixture-video?feature=oembed"');
+    expect(car?.content.legacyBodyHtml).toContain('loading="lazy"');
+    expect(car?.content.legacyBodyHtml).toContain("https://vimeo.com/missing-video");
+    expect(result.validation.warnings).toContainEqual(expect.objectContaining({ code: "oembedCacheMissing", details: { url: "https://vimeo.com/missing-video" } }));
+  });
+
   it("resolves attachment IDs in image fields and records the original asset", async () => {
     const carApi = mapping.apis.cars!;
     const imageMapping = defineMigration({
