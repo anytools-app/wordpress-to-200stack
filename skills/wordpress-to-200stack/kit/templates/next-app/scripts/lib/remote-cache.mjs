@@ -175,13 +175,20 @@ function isLocal(url) {
 }
 
 /** Route external browser requests through the disk cache, returning a deterministic 404 on a miss. */
-export async function installCacheRoutes(context, { hosts = [] } = {}) {
+export async function installCacheRoutes(context, { hosts = [], passthrough = [] } = {}) {
   const configuredHosts = new Set(hosts.map((host) => host.toLowerCase()));
+  const passthroughSuffixes = passthrough.map((host) => host.toLowerCase());
   await context.route("**/*", async (route) => {
     let url;
     try {
       url = new URL(route.request().url());
     } catch {
+      await route.continue();
+      return;
+    }
+    // 動的埋め込み(YouTube等)はキャッシュすると描画が壊れるため素通し(保護対象は移行元オリジンのみ)。
+    const hostname = url.hostname.toLowerCase();
+    if (passthroughSuffixes.some((suffix) => hostname === suffix || hostname.endsWith(`.${suffix}`))) {
       await route.continue();
       return;
     }
