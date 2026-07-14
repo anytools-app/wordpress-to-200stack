@@ -34,6 +34,22 @@ npm run wpkit -- archive <https://origin> -o ../_scratch/archive   # まず --li
 - **切替後は二度と取れない基準データ**(HTML・メタ・スクショ・アセット・フォーム台帳・リダイレクト記録)
 - `forms.json` が外部フォーム endpoint の台帳。`meta.json` の redirects 記録が 301 表の材料になる
 
+### 原点サーバー保護(fetch-once。違反すると本番を止める)
+
+**検証・レビュー系ツールは、現行本番サーバーへ同じURLに二度アクセスしてはならない。**
+スクショ比較・レビュー用サーバー・ブラウザ検証は、ページが参照する画像・アセットを毎回
+原点から取得しがちで、「ページ数 × 画像 × 実行回数」で本番の転送量クォータを食い潰す
+(実案件で月間200GBを使い切り本番サーバーが停止した事故あり)。
+
+- 全リモート取得を**ディスクキャッシュ経由**にする: 解決順 = キャッシュ → archive の assets
+  (ファイル名がURLエンコードされた完全URL、そのままURL→ファイル台帳になる)→ ネットワーク
+  (成功時のみ保存)。kit の `templates/next-app/scripts/` に `lib/remote-cache.mjs`(核)と
+  `serve-cached.mjs`(静的配信+fetch-once プロキシ)の実装がある
+- レビューは素の `npx serve out` でなく `node scripts/serve-cached.mjs` を使う
+  (`NEXT_PUBLIC_MEDIA_HOST` をローカルプロキシに向ける)
+- Playwright での機械スクショは context に外部ホストの route interception を張り、
+  フォント CDN 含む全外部リクエストをキャッシュ経由にする(副次効果: スクショが決定的になる)
+
 ### 1. analyze → 2. mapping config(製品判断)
 
 ```bash
