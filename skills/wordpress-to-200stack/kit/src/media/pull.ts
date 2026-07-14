@@ -2,8 +2,7 @@ import { createHash } from "node:crypto";
 import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 
-import pLimit from "p-limit";
-
+import { createPacer, parseRetryAfter, type PacerOptions, type PacerStats } from "../core/pacer.js";
 import type { AttachmentEntry, LegacyDocument } from "../parse/index.js";
 
 export type MediaManifestEntry = {
@@ -33,6 +32,11 @@ export type MediaPullOptions = {
   includeDerived?: boolean;
   fetchImpl?: typeof fetch;
   sleep?: (milliseconds: number) => Promise<void>;
+  startIntervalMs?: number;
+  minIntervalMs?: number;
+  adaptive?: boolean;
+  pacerOptions?: Partial<Omit<PacerOptions, "startIntervalMs" | "minIntervalMs" | "maxConcurrency" | "adaptive">>;
+  onPacerStats?: (stats: PacerStats) => void;
 };
 
 function parseNdjson<T>(value: string): T[] {
@@ -102,14 +106,29 @@ export async function pullMedia(options: MediaPullOptions): Promise<MediaPullRes
   ]);
   const urls = collectMediaUrls(attachments, documents, options.includeDerived).slice(0, options.limit);
   await mkdir(mediaDir, { recursive: true });
-  const limit = pLimit(Math.max(1, options.concurrency ?? 6));
-  const results = await Promise.all(urls.map((sourceUrl) => limit(async (): Promise<{ entry: MediaManifestEntry; skipped: boolean }> => {
+  const pacer = createPacer({
+    ...options.pacerOptions,
+    maxConcurrency: Math.max(1, options.concurrency ?? 6),
+    minIntervalMs: Math.max(0, options.minIntervalMs ?? 0),
+    startIntervalMs: Math.max(0, options.startIntervalMs ?? 1000),
+    adaptive: options.adaptive ?? true,
+  });
+  let completedRequests = 0;
+  const results = await Promise.all(urls.map(async (sourceUrl): Promise<{ entry: MediaManifestEntry; skipped: boolean }> => {
     const parsed = new URL(sourceUrl);
     const relativePath = uploadPath(parsed);
     if (!relativePath) throw new Error(`uploads path ではありません: ${sourceUrl}`);
     const outputPath = join(mediaDir, relativePath);
     const fetchedAt = new Date().toISOString();
-    const response = await download(fetchImpl, sourceUrl, sleep);
+    const response = await pacer.run(
+      () => download(fetchImpl, sourceUrl, sleep),
+      (downloaded) => ({
+        ok: !!downloaded && downloaded.ok,
+        ...(downloaded?.status === 429 ? { retryAfterMs: parseRetryAfter(downloaded.headers.get("retry-after"), options.pacerOptions?.now?.()) } : {}),
+      }),
+    );
+    completedRequests += 1;
+    if (completedRequests % 10 === 0) options.onPacerStats?.(pacer.stats());
     if (!response || !response.ok) {
       return { skipped: false, entry: { sourceUrl, path: relativePath, bytes: 0, contentType: response?.headers.get("content-type") ?? "", sha256: emptyDigest(), status: "missing", fetchedAt } };
     }
@@ -133,7 +152,8 @@ export async function pullMedia(options: MediaPullOptions): Promise<MediaPullRes
     await mkdir(dirname(outputPath), { recursive: true });
     await writeFile(outputPath, body);
     return { skipped: false, entry: { sourceUrl, path: relativePath, bytes, contentType, sha256, status: "ok", fetchedAt } };
-  })));
+  }));
+  options.onPacerStats?.(pacer.stats());
   const manifest = results.map((result) => result.entry);
   const missingUrls = manifest.filter((entry) => entry.status === "missing").map((entry) => entry.sourceUrl);
   await Promise.all([

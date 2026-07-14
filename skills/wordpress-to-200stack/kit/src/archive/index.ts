@@ -3,8 +3,9 @@ import { join } from "node:path";
 
 import { load as loadHtml } from "cheerio";
 import { XMLParser } from "fast-xml-parser";
-import pLimit from "p-limit";
 import { chromium } from "playwright";
+
+import { createPacer, parseRetryAfter, type PacerOptions, type PacerStats } from "../core/pacer.js";
 
 type FetchResponse = { requestedUrl: string; finalUrl: string; status: number; headers: Headers; body: Buffer; redirects: Array<{ from: string; to: string; status: number }> };
 export type ArchivePageMeta = {
@@ -30,13 +31,18 @@ export type ArchiveOptions = {
   screenshots?: boolean;
   limit?: number;
   fetchImpl?: typeof fetch;
+  /** @deprecated Use minIntervalMs. Kept for programmatic compatibility. */
   requestDelayMs?: number;
+  startIntervalMs?: number;
+  minIntervalMs?: number;
+  adaptive?: boolean;
+  pacerOptions?: Partial<Omit<PacerOptions, "startIntervalMs" | "minIntervalMs" | "maxConcurrency" | "adaptive">>;
+  onPacerStats?: (stats: PacerStats) => void;
   resume?: boolean;
   screenshotTimeout?: number;
 };
 export type ArchiveResult = { archiveDir: string; pages: Array<{ url: string; status: number; title?: string; screenshots: boolean }>; forms: Array<{ endpoint: string; pages: string[] }>; skipped: number; screenshotFailed: number; assetExcluded: number; warnings: ArchiveWarning[] };
 
-function delay(milliseconds: number): Promise<void> { return new Promise((resolve) => setTimeout(resolve, milliseconds)); }
 const ASSET_EXTENSION = /\.(?:avif|bmp|css|eot|gif|ico|jpe?g|js|map|m4a|m4v|mov|mp3|mp4|og[gv]|pdf|png|svg|tar|tgz|ttf|wav|webm|webp|woff2?|xz|zip)$/i;
 function isAssetUrl(value: string, origin: URL): string | undefined {
   try {
@@ -129,34 +135,35 @@ function cssAssets(css: string, cssUrl: string): string[] {
   return [...found];
 }
 
-function createRequester(fetchImpl: typeof fetch, delayMs: number) {
-  let previous = Promise.resolve();
+function createRequester(fetchImpl: typeof fetch, pacer: ReturnType<typeof createPacer>, now: (() => number) | undefined, onPacerStats: ((stats: PacerStats) => void) | undefined) {
+  let completedRequests = 0;
   return async (requestedUrl: string): Promise<FetchResponse> => {
-    let release: () => void = () => undefined;
-    const turn = new Promise<void>((resolve) => { release = resolve; });
-    const waitFor = previous;
-    previous = turn;
-    await waitFor;
-    if (delayMs > 0) await delay(delayMs);
-    release();
-    const redirects: FetchResponse["redirects"] = [];
-    let current = requestedUrl;
-    for (let count = 0; count < 10; count += 1) {
-      const response = await fetchImpl(current, { redirect: "manual", headers: { "user-agent": "wp-static-kit-archive/0.1" } });
-      const location = response.headers.get("location");
-      if (response.status >= 300 && response.status < 400 && location) {
-        const next = new URL(location, current).toString();
-        redirects.push({ from: current, to: next, status: response.status });
-        current = next;
-        continue;
+    const result = await pacer.run(async () => {
+      const redirects: FetchResponse["redirects"] = [];
+      let current = requestedUrl;
+      for (let count = 0; count < 10; count += 1) {
+        const response = await fetchImpl(current, { redirect: "manual", headers: { "user-agent": "wp-static-kit-archive/0.1" } });
+        const location = response.headers.get("location");
+        if (response.status >= 300 && response.status < 400 && location) {
+          const next = new URL(location, current).toString();
+          redirects.push({ from: current, to: next, status: response.status });
+          current = next;
+          continue;
+        }
+        return { requestedUrl, finalUrl: current, status: response.status, headers: response.headers, body: Buffer.from(await response.arrayBuffer()), redirects };
       }
-      return { requestedUrl, finalUrl: current, status: response.status, headers: response.headers, body: Buffer.from(await response.arrayBuffer()), redirects };
-    }
-    throw new Error(`redirect loop: ${requestedUrl}`);
+      throw new Error(`redirect loop: ${requestedUrl}`);
+    }, (response) => ({
+      ok: response.status >= 200 && response.status < 400,
+      ...(response.status === 429 ? { retryAfterMs: parseRetryAfter(response.headers.get("retry-after"), now?.()) } : {}),
+    }));
+    completedRequests += 1;
+    if (completedRequests % 10 === 0) onPacerStats?.(pacer.stats());
+    return result;
   };
 }
 
-async function saveAssets(assetUrls: string[], archiveDir: string, request: (url: string) => Promise<FetchResponse>, concurrency: number): Promise<void> {
+async function saveAssets(assetUrls: string[], archiveDir: string, request: (url: string) => Promise<FetchResponse>): Promise<void> {
   const assetsDir = join(archiveDir, "assets");
   await mkdir(assetsDir, { recursive: true });
   const all = new Set(assetUrls);
@@ -170,14 +177,13 @@ async function saveAssets(assetUrls: string[], archiveDir: string, request: (url
     return [] as string[];
   }));
   for (const urls of css) for (const url of urls) all.add(url);
-  const limit = pLimit(concurrency);
-  await Promise.all([...all].map((url) => limit(async () => {
+  await Promise.all([...all].map(async (url) => {
     try {
       const response = await request(url);
       if (response.status < 200 || response.status >= 300) return;
       await writeFile(assetPath(assetsDir, url), response.body);
     } catch { /* recordable page inventory remains useful when an asset is gone */ }
-  })));
+  }));
 }
 
 export async function withTimeout<T>(work: () => Promise<T>, timeoutMs: number): Promise<T> {
@@ -253,7 +259,14 @@ export async function archiveSite(options: ArchiveOptions): Promise<ArchiveResul
   const maxPages = options.maxPages ?? 2000;
   const concurrency = Math.max(1, options.concurrency ?? 4);
   const screenshotTimeoutMs = Math.max(1, options.screenshotTimeout ?? 30) * 1000;
-  const request = createRequester(options.fetchImpl ?? fetch, options.requestDelayMs ?? 100);
+  const pacer = createPacer({
+    ...options.pacerOptions,
+    maxConcurrency: concurrency,
+    minIntervalMs: Math.max(0, options.minIntervalMs ?? options.requestDelayMs ?? 100),
+    startIntervalMs: Math.max(0, options.startIntervalMs ?? 1000),
+    adaptive: options.adaptive ?? true,
+  });
+  const request = createRequester(options.fetchImpl ?? fetch, pacer, options.pacerOptions?.now, options.onPacerStats);
   await mkdir(join(archiveDir, "pages"), { recursive: true });
   const previous = options.resume ? await readPreviousInventory(archiveDir) : { urls: [], forms: [], warnings: [] };
   const previousByUrl = new Map(previous.urls.map((page) => [page.url, page]));
@@ -284,34 +297,59 @@ export async function archiveSite(options: ArchiveOptions): Promise<ArchiveResul
   await visitSitemap(new URL("/sitemap.xml", origin).toString());
   const queue = [...new Set([origin.toString(), ...sitemapUrls, ...previous.urls.map((page) => page.url)])];
   const queued = new Set(queue);
-  const pages: ArchivedPage[] = [];
-  for (let index = 0; index < queue.length && pages.length < maxPages;) {
-    const batch = queue.slice(index, index + Math.min(concurrency, maxPages - pages.length));
-    index += batch.length;
-    const fetched = await Promise.all(batch.map(async (url) => {
-      const prior = previousByUrl.get(url) ?? { url, status: 200 };
-      if (options.resume) {
-        const page = await existingPage(archiveDir, url, prior);
-        if (page) {
-          if (page.screenshots) skipped += 1;
-          return page;
-        }
+  const results: Array<ArchivedPage | undefined> = [];
+  let successfulPages = 0;
+  const archivePage = async (url: string): Promise<ArchivedPage | undefined> => {
+    const prior = previousByUrl.get(url) ?? { url, status: 200 };
+    if (options.resume) {
+      const page = await existingPage(archiveDir, url, prior);
+      if (page) {
+        if (page.screenshots) skipped += 1;
+        return page;
       }
-      try { return await request(url); } catch { return undefined; }
-    }));
-    for (const item of fetched) {
-      if (!item) continue;
-      if ("response" in item) { pages.push(item); continue; }
-      const response = item;
+    }
+    try {
+      const response = await request(url);
       const contentType = response.headers.get("content-type") ?? "";
       const html = /text\/html|application\/xhtml\+xml/i.test(contentType) ? response.body.toString("utf8") : undefined;
       const meta = pageMeta(response, origin, assetExcluded);
-      pages.push({ response, html, meta, screenshots: false });
       if (html && response.status >= 200 && response.status < 400) for (const link of meta.internalLinks) {
         if (!queued.has(link) && queued.size < maxPages) { queued.add(link); queue.push(link); }
       }
-    }
-  }
+      return { response, html, meta, screenshots: false };
+    } catch { return undefined; }
+  };
+  await new Promise<void>((resolve) => {
+    let next = 0;
+    let pending = 0;
+    let settled = false;
+    const finish = () => {
+      if (!settled && pending === 0 && (next >= queue.length || successfulPages >= maxPages)) {
+        settled = true;
+        resolve();
+      }
+    };
+    const launch = (): void => {
+      while (pending < concurrency && next < queue.length && successfulPages + pending < maxPages) {
+        const resultIndex = next;
+        const url = queue[next];
+        next += 1;
+        if (!url) continue;
+        pending += 1;
+        void archivePage(url).then((page) => {
+          results[resultIndex] = page;
+          if (page) successfulPages += 1;
+        }, () => undefined).finally(() => {
+          pending -= 1;
+          launch();
+          finish();
+        });
+      }
+      finish();
+    };
+    launch();
+  });
+  const pages = results.filter((page): page is ArchivedPage => page !== undefined);
   const archivedPages = options.limit === undefined ? pages : pages.slice(0, options.limit);
   const assetUrls = new Set<string>();
   for (const page of archivedPages) {
@@ -323,7 +361,8 @@ export async function archiveSite(options: ArchiveOptions): Promise<ArchiveResul
     }
     if (!(options.resume && await exists(join(directory, "meta.json")))) await writeFile(join(directory, "meta.json"), `${JSON.stringify(page.meta, null, 2)}\n`);
   }
-  await saveAssets([...assetUrls], archiveDir, request, concurrency);
+  await saveAssets([...assetUrls], archiveDir, request);
+  options.onPacerStats?.(pacer.stats());
   const screenshotFailed = options.screenshots ?? true ? await takeScreenshots(archivedPages.filter((page) => !page.screenshots), archiveDir, screenshotTimeoutMs, warnings) : 0;
   const formsByEndpoint = new Map<string, Set<string>>();
   for (const page of archivedPages) for (const form of page.meta.forms) {

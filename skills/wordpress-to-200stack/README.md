@@ -54,3 +54,5 @@ skills/wordpress-to-200stack/
 - `wpkit` は対象 WordPress サイト・microCMS API・200stack へアクセスします(archive で現行サイトをクロール、media/import で microCMS へ書き込み)
 - microCMS への入稿は冪等設計ですが、**移行先の microCMS サービスに書き込みます**。本番サービスに向ける前にゲート1〜3を通してください
 - 元の WordPress サイトへの書き込みは行いません(archive は読み取りのみ)
+- archive・media pull の HTTP リクエストは適応レート制御付きです(約1req/sから開始し、応答が健全なら現行上限までランプアップ。429/Retry-After・レイテンシ悪化で自動減速。`--no-adaptive` で無効化)
+- **警告**: archive の Playwright スクリーンショット段はレート制御の対象外で、全ページを desktop/mobile の2回フルロードする最重量経路です。移行元サーバの負荷が懸念される場合は `--no-screenshots` で分離実行を検討してください

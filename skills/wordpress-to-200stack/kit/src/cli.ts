@@ -24,6 +24,10 @@ const positiveCount = (value: string): number => {
   if (parsed === 0) throw new Error(`1 以上の整数を指定してください: ${value}`);
   return parsed;
 };
+const pacingProgress = (command: string) => (stats: { intervalMs: number; concurrency: number; baselineMs?: number }) => {
+  const baseline = stats.baselineMs === undefined ? "pending" : `${Math.round(stats.baselineMs)}ms`;
+  console.error(`${command} pacing: interval=${stats.intervalMs}ms concurrency=${stats.concurrency} baseline=${baseline}`);
+};
 
 program
   .name("wpkit")
@@ -68,11 +72,14 @@ media
   .command("pull")
   .requiredOption("--ir <irDir>", "parse output directory")
   .option("-o, --media <mediaDir>", "media output directory", "./media")
-  .option("--concurrency <count>", "parallel downloads", positiveCount, 6)
+  .option("--concurrency <count>", "max parallel downloads", positiveCount, 6)
+  .option("--rate-start-ms <ms>", "initial request interval in milliseconds", count, 1000)
+  .option("--min-interval-ms <ms>", "minimum request interval in milliseconds", count, 0)
+  .option("--no-adaptive", "start immediately at the configured maximum rate")
   .option("--limit <count>", "process only the first N URLs", count)
   .option("--include-derived", "include WordPress generated image sizes")
-  .action(async (options: { ir: string; media: string; concurrency: number; limit?: number; includeDerived?: boolean }) => {
-    const result = await pullMedia({ irDir: options.ir, mediaDir: options.media, concurrency: options.concurrency, limit: options.limit, includeDerived: options.includeDerived });
+  .action(async (options: { ir: string; media: string; concurrency: number; rateStartMs: number; minIntervalMs: number; adaptive: boolean; limit?: number; includeDerived?: boolean }) => {
+    const result = await pullMedia({ irDir: options.ir, mediaDir: options.media, concurrency: options.concurrency, startIntervalMs: options.rateStartMs, minIntervalMs: options.minIntervalMs, adaptive: options.adaptive, limit: options.limit, includeDerived: options.includeDerived, onPacerStats: pacingProgress("media pull") });
     console.log(JSON.stringify({ ok: result.ok, missing: result.missing, invalid: result.invalid, skipped: result.skipped, mediaDir: options.media }));
   });
 
@@ -117,14 +124,17 @@ program
   .command("archive <origin>")
   .option("-o, --out-dir <archiveDir>", "archive output directory", "./archive")
   .option("--max-pages <count>", "maximum number of pages", count, 2000)
-  .option("--concurrency <count>", "parallel asset downloads", positiveCount, 4)
+  .option("--concurrency <count>", "max parallel requests", positiveCount, 4)
+  .option("--rate-start-ms <ms>", "initial request interval in milliseconds", count, 1000)
+  .option("--min-interval-ms <ms>", "minimum request interval in milliseconds", count, 100)
+  .option("--no-adaptive", "start immediately at the configured maximum rate")
   .option("--limit <count>", "process only the first N collected URLs", count)
   .option("--screenshots", "enable Playwright screenshots", true)
   .option("--no-screenshots", "disable Playwright screenshots")
   .option("--resume", "reuse existing archived HTML and completed screenshots")
   .option("--screenshot-timeout <sec>", "timeout per page for desktop and mobile screenshots", positiveCount, 30)
-  .action(async (origin: string, options: { outDir: string; maxPages: number; concurrency: number; limit?: number; screenshots: boolean; resume?: boolean; screenshotTimeout: number }) => {
-    const result = await archiveSite({ origin, archiveDir: options.outDir, maxPages: options.maxPages, concurrency: options.concurrency, limit: options.limit, screenshots: options.screenshots, resume: options.resume, screenshotTimeout: options.screenshotTimeout });
+  .action(async (origin: string, options: { outDir: string; maxPages: number; concurrency: number; rateStartMs: number; minIntervalMs: number; adaptive: boolean; limit?: number; screenshots: boolean; resume?: boolean; screenshotTimeout: number }) => {
+    const result = await archiveSite({ origin, archiveDir: options.outDir, maxPages: options.maxPages, concurrency: options.concurrency, startIntervalMs: options.rateStartMs, minIntervalMs: options.minIntervalMs, adaptive: options.adaptive, limit: options.limit, screenshots: options.screenshots, resume: options.resume, screenshotTimeout: options.screenshotTimeout, onPacerStats: pacingProgress("archive") });
     console.log(JSON.stringify({ pages: result.pages.length, forms: result.forms.length, skipped: result.skipped, screenshotFailed: result.screenshotFailed, assetExcluded: result.assetExcluded, archiveDir: result.archiveDir }));
   });
 

@@ -41,7 +41,7 @@ describe("wpkit archive", () => {
       const address = server.address(); if (!address || typeof address === "string") throw new Error("server did not start");
       const origin = `http://127.0.0.1:${address.port}`;
       const archiveDir = await tempDir();
-      const result = await archiveSite({ origin, archiveDir, screenshots: false, requestDelayMs: 0 });
+      const result = await archiveSite({ origin, archiveDir, screenshots: false, requestDelayMs: 0, adaptive: false });
       expect(result.pages).toHaveLength(3);
       expect(result.pages.find((page) => page.url.endsWith("/old"))).toMatchObject({ status: 200, screenshots: false });
       expect(result.forms).toEqual([{ endpoint: "https://formrun.example/submit", pages: [`${origin}/about`] }]);
@@ -58,6 +58,22 @@ describe("wpkit archive", () => {
     } finally { await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve())); }
   });
 
+  it("keeps limited archived pages in discovery order when requests complete out of order", async () => {
+    const archiveDir = await tempDir();
+    const fetchImpl: typeof fetch = async (input) => {
+      const url = new URL(String(input));
+      if (url.pathname === "/sitemap.xml") return new Response('<?xml version="1.0"?><urlset><url><loc>/</loc></url><url><loc>/about</loc></url></urlset>');
+      if (url.pathname === "/") {
+        await new Promise((resolve) => setTimeout(resolve, 10));
+        return new Response("<title>Home</title>", { headers: { "content-type": "text/html" } });
+      }
+      if (url.pathname === "/about") return new Response("<title>About</title>", { headers: { "content-type": "text/html" } });
+      return new Response("missing", { status: 404 });
+    };
+    const result = await archiveSite({ origin: "https://old.test", archiveDir, screenshots: false, fetchImpl, concurrency: 2, requestDelayMs: 0, adaptive: false, limit: 1 });
+    expect(result.pages).toEqual([{ url: "https://old.test/", status: 200, title: "Home", screenshots: false }]);
+  });
+
   it("resume reuses complete pages without refetching them", async () => {
     let pageRequests = 0;
     const server = createServer((request, response) => {
@@ -72,13 +88,13 @@ describe("wpkit archive", () => {
       const address = server.address(); if (!address || typeof address === "string") throw new Error("server did not start");
       const origin = `http://127.0.0.1:${address.port}`;
       const archiveDir = await tempDir();
-      await archiveSite({ origin, archiveDir, screenshots: false, requestDelayMs: 0 });
+      await archiveSite({ origin, archiveDir, screenshots: false, requestDelayMs: 0, adaptive: false });
       for (const path of ["/", "/about"]) {
         const directory = join(archiveDir, "pages", encodeURIComponent(path));
         await Promise.all([writeFile(join(directory, "desktop.png"), "desktop"), writeFile(join(directory, "mobile.png"), "mobile")]);
       }
       pageRequests = 0;
-      const result = await archiveSite({ origin, archiveDir, screenshots: false, resume: true, requestDelayMs: 0 });
+      const result = await archiveSite({ origin, archiveDir, screenshots: false, resume: true, requestDelayMs: 0, adaptive: false });
       expect(pageRequests).toBe(0);
       expect(result.skipped).toBe(2);
       expect(result.pages).toHaveLength(2);

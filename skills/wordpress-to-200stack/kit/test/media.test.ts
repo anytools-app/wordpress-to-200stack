@@ -33,13 +33,13 @@ describe("wpkit media pull", () => {
       const body = url.endsWith("retry.jpg") ? "retry" : url.endsWith("150x150.jpg") ? "thumb" : "original";
       return new Response(body, { headers: { "content-type": "image/jpeg", "content-length": String(Buffer.byteLength(body)) } });
     };
-    const first = await pullMedia({ irDir, mediaDir, includeDerived: true, fetchImpl: mockedFetch, sleep: async () => undefined });
+    const first = await pullMedia({ irDir, mediaDir, includeDerived: true, fetchImpl: mockedFetch, sleep: async () => undefined, adaptive: false });
     expect(first).toMatchObject({ ok: 3, invalid: 1, missing: 0, skipped: 0 });
     expect(calls.get("https://old.test/wp-content/uploads/2024/retry.jpg")).toBe(2);
     const manifest = (await readFile(join(mediaDir, "manifest.ndjson"), "utf8")).trim().split("\n").map((line) => JSON.parse(line) as MediaManifestEntry);
     expect(manifest.find((entry) => entry.sourceUrl.endsWith("html.jpg"))).toMatchObject({ status: "invalid-type", contentType: "text/html" });
     expect(await readFile(join(mediaDir, "wp-content/uploads/2024/a-150x150.jpg"), "utf8")).toBe("thumb");
-    const second = await pullMedia({ irDir, mediaDir, includeDerived: true, fetchImpl: mockedFetch, sleep: async () => undefined });
+    const second = await pullMedia({ irDir, mediaDir, includeDerived: true, fetchImpl: mockedFetch, sleep: async () => undefined, adaptive: false });
     expect(second.skipped).toBe(3);
   });
 });
