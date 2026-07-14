@@ -168,6 +168,7 @@ function convertField(field: FieldDef, value: string, warnings: ValidationIssue[
 }
 
 function fieldValue(field: FieldDef, item: WxrItem, warnings: ValidationIssue[], config: MigrationConfig, assets: Set<string>, attachmentsById: Map<number, WxrItem>): unknown {
+  if (field.metaKey === "wp:menu_order") return convertField(field, String(item.menuOrder), warnings, item, config, assets, attachmentsById);
   const values = metaValues(item, field.metaKey);
   if (field.type === "stringArray") return values.map((value) => convertField({ ...field, type: "string" }, value, warnings, item, config, assets, attachmentsById));
   return convertField(field, values[0] ?? "", warnings, item, config, assets, attachmentsById);
@@ -249,7 +250,9 @@ export function parseMigration(config: MigrationConfig, xml: string): ParseResul
   const candidates: Array<{ item: WxrItem; api: string; definition: ApiDef }> = [];
   const configuredMeta = new Map<string, { api: string; key: string }>();
   for (const [api, definition] of Object.entries(config.apis)) {
-    for (const field of [...definition.fields, ...(definition.repeaters ?? []).flatMap((repeater) => repeater.columns)]) configuredMeta.set(`${api}:${field.metaKey}`, { api, key: field.metaKey });
+    for (const field of [...definition.fields, ...(definition.repeaters ?? []).flatMap((repeater) => repeater.columns)]) {
+      if (field.metaKey !== "wp:menu_order" && !field.allowMissing) configuredMeta.set(`${api}:${field.metaKey}`, { api, key: field.metaKey });
+    }
     for (const relation of definition.relations ?? []) configuredMeta.set(`${api}:${relation.metaKey}`, { api, key: relation.metaKey });
     if (definition.featuredImage) configuredMeta.set(`${api}:_thumbnail_id`, { api, key: "_thumbnail_id" });
   }

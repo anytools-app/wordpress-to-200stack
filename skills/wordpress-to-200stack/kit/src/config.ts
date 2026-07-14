@@ -2,7 +2,7 @@ import { z } from "zod";
 
 export const fieldTypes = ["string", "text", "html", "number", "boolean", "date", "image", "stringArray", "select"] as const;
 export type FieldType = typeof fieldTypes[number];
-export type FieldDef = { metaKey: string; fieldId: string; type: FieldType; label?: string; options?: string[] };
+export type FieldDef = { metaKey: string; fieldId: string; type: FieldType; label?: string; options?: string[]; allowMissing?: boolean };
 export type RepeaterDef = { fieldId: string; label?: string; columns: FieldDef[] };
 export type RelationDef = { metaKey: string; fieldId: string; toApi: string };
 export type ApiDef = {
@@ -33,6 +33,7 @@ const FieldDefSchema = z.object({
   type: z.enum(fieldTypes),
   label: z.string().optional(),
   options: z.array(nonEmpty).optional(),
+  allowMissing: z.boolean().optional(),
 }).strict();
 const ApiDefSchema = z.object({
   from: z.union([nonEmpty, z.array(nonEmpty).min(1)]),
