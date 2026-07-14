@@ -112,6 +112,33 @@ npm run wpkit -- import --ir ../_scratch/ir --dry-run   # oversized 0 を確認 
 - レビューは司令塔がローカルで実施: typecheck / build / **Playwright 実画面スクショと原文スクショの比較**
   (委任先 sandbox は listen・ブラウザ不可のため実画面確認は司令塔の仕事)
 
+### 6.5 デザイン忠実再現の diff-first ループ(fidelity)
+
+テンプレ実装後の再現度追い込みは、感覚でなく機械スクショ差分で回す。kit の
+`templates/next-app/scripts/` に `fidelity-scan.mjs`(全ページを凍結スクショと
+pixelmatch 比較、surface=テンプレ種別ごとに集計)と `fidelity-report.mjs`
+(ワースト表の TODO 生成)、`lib/surfaces.mjs`(パス→surface 規則。
+**案件のURL設計に合わせて必ず調整**)がある。
+
+```bash
+node scripts/fidelity-scan.mjs [--only <surfaceId>]   # WPKIT_ARCHIVE / WPKIT_IR_DIR / WPKIT_ORIGIN を環境変数で
+node scripts/fidelity-report.mjs                      # FIDELITY_TODO.md を再生成
+```
+
+運用ループ(実案件で確立):
+
+1. ワースト surface を選ぶ → 代表ページを**ブロック単位のDOM実測**(原文 page.html を
+   レンダリングして y/height を突き合わせ)で診断 → 根因を特定してから修正を委任
+2. 修正 → 再スキャン → champion(新旧比較)をユーザーに提示 → 承認されたら
+   approvals 台帳(例: docs/fidelity-approvals.json)に記録し、現行スクショを
+   baseline として凍結(以後は退行検知に使う)
+3. **scan の ratio は絶対値でなく相対比較に使う**: リモート資源・埋め込みの描画で
+   run 間にぶれる。決定的な判定は DOM 実測が正。ページ固有の到達下限は
+   「原文 page.html を今日レンダリングして原文スクショ自身と比較」(ノイズフロア)で測れる
+4. スクショの決定性のため、スキャンは reducedMotion をエミュレートする。
+   自動送りカルーセル等は `prefers-reduced-motion: reduce` で停止するガードを実装に入れる
+5. 意図的差分(製品判断による原文からの乖離)は approvals 台帳の notes に集約する
+
 ### 7. verify(ゲート4)
 
 ```bash
