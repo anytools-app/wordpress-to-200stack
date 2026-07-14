@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { importDocuments } from "../src/microcms/import.js";
+import { defineMigration, type MigrationConfig } from "../src/config.js";
 import type { LegacyDocument } from "../src/parse/index.js";
 
 const temporary: string[] = [];
@@ -24,6 +25,10 @@ async function writeIr(documents: LegacyDocument[]): Promise<string> {
   const ir = await tempDir(); await writeFile(join(ir, "documents.ndjson"), `${documents.map((value) => JSON.stringify(value)).join("\n")}\n`); return ir;
 }
 function response(body: unknown = {}, status = 200): Response { return new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } }); }
+const normalizationConfig: MigrationConfig = defineMigration({
+  wxr: "/tmp/test.xml", site: { origin: "https://old.test", mediaHost: "https://media.test" },
+  apis: { cars: { from: ["staff", "vendors"], kindField: "kind", fields: [{ metaKey: "price", fieldId: "price", type: "number" }, { metaKey: "label", fieldId: "label", type: "string" }] } },
+});
 
 describe("wpkit import", () => {
   it("uses PUT payloads, repeater field IDs, a second relation PATCH, and global rate waits", async () => {
@@ -56,5 +61,30 @@ describe("wpkit import", () => {
     const ir = await writeIr([doc({ content: { title: "x".repeat(190 * 1024), legacyBodyHtml: "", excerpt: "", publishedAt: "" }, relations: [] })]);
     const result = await importDocuments({ irDir: ir, dryRun: true, fetchImpl: async () => { throw new Error("must not fetch"); } });
     expect(result).toMatchObject({ dryRun: true, wouldUpload: 0, oversized: 1, uploaded: 0 });
+  });
+
+  it("normalizes select values to arrays before PUT", async () => {
+    const ir = await writeIr([doc({ kind: "staff", relations: [] })]); const bodies: Record<string, unknown>[] = [];
+    await importDocuments({ irDir: ir, config: normalizationConfig, serviceDomain: "service", apiKey: "key", sleep: async () => undefined, fetchImpl: async (_url, init) => {
+      if (init?.method === "PUT") bodies.push(JSON.parse(String(init.body)) as Record<string, unknown>);
+      return init?.method === "GET" ? response({ totalCount: 1 }) : response();
+    } });
+    expect(bodies[0]?.kind).toEqual(["staff"]);
+  });
+
+  it("drops invalid number strings and reports a warning", async () => {
+    const ir = await writeIr([doc({ fields: { price: "ASK" }, relations: [] })]);
+    const result = await importDocuments({ irDir: ir, config: normalizationConfig, dryRun: true });
+    expect(result.warnings).toContainEqual({ api: "cars", contentId: "cars-10", fieldId: "price", value: "ASK", reason: "invalidNumber" });
+    expect(result.wouldUpload).toBe(1);
+  });
+
+  it("drops empty strings from payloads", async () => {
+    const ir = await writeIr([doc({ fields: { label: "" }, relations: [] })]); const bodies: Record<string, unknown>[] = [];
+    await importDocuments({ irDir: ir, config: normalizationConfig, serviceDomain: "service", apiKey: "key", sleep: async () => undefined, fetchImpl: async (_url, init) => {
+      if (init?.method === "PUT") bodies.push(JSON.parse(String(init.body)) as Record<string, unknown>);
+      return init?.method === "GET" ? response({ totalCount: 1 }) : response();
+    } });
+    expect(bodies[0]).not.toHaveProperty("label");
   });
 });

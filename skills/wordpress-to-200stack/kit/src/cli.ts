@@ -97,12 +97,14 @@ schema
 program
   .command("import")
   .requiredOption("--ir <irDir>", "parse output directory")
+  .option("--config <mappingConfig>", "mapping.config.ts path (payload normalization)")
   .option("--only <api>", "import only one API")
   .option("--source-id <wpId>", "import only one WordPress source ID", positiveCount)
   .option("--dry-run", "show counts without sending requests")
   .option("--concurrency <count>", "parallel request preparation", positiveCount, 1)
-  .action(async (options: { ir: string; only?: string; sourceId?: number; dryRun?: boolean; concurrency: number }) => {
-    const result = await importDocuments({ irDir: options.ir, only: options.only, sourceId: options.sourceId, dryRun: options.dryRun, concurrency: options.concurrency });
+  .action(async (options: { ir: string; config?: string; only?: string; sourceId?: number; dryRun?: boolean; concurrency: number }) => {
+    const config = options.config ? (await loadMigrationConfig(options.config)).config : undefined;
+    const result = await importDocuments({ irDir: options.ir, config, only: options.only, sourceId: options.sourceId, dryRun: options.dryRun, concurrency: options.concurrency });
     console.log(JSON.stringify(result));
     if (result.failures.length > 0) process.exitCode = 1;
   });

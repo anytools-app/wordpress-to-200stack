@@ -3,6 +3,7 @@ import { join } from "node:path";
 
 import pLimit from "p-limit";
 
+import type { ApiDef, FieldDef, MigrationConfig } from "../config.js";
 import type { LegacyDocument } from "../parse/index.js";
 
 type FetchLike = typeof fetch;
@@ -17,11 +18,15 @@ export type ImportOptions = {
   apiKey?: string;
   fetchImpl?: FetchLike;
   sleep?: (milliseconds: number) => Promise<void>;
+  /** Optional mapping information used only to normalize the microCMS write payload. */
+  config?: MigrationConfig;
 };
 export type ImportFailure = { api: string; contentId: string; phase: "payload" | "upsert" | "relation"; message: string };
+export type ImportWarning = { api: string; contentId: string; fieldId: string; value: unknown; reason: "invalidNumber" | "invalidSelectOption" };
 export type ImportResult = {
   total: number; wouldUpload: number; uploaded: number; skipped: number; oversized: number; dryRun: boolean;
   failures: ImportFailure[];
+  warnings: ImportWarning[];
   totals: Array<{ api: string; expected: number; actual?: number; matches?: boolean }>;
 };
 
@@ -61,6 +66,56 @@ function documentPayload(document: LegacyDocument): Record<string, unknown> {
     ...(document.kind ? { kind: document.kind } : {}),
     ...(document.featuredImage ? { featuredImage: document.featuredImage } : {}),
   };
+}
+
+function fieldsForApi(api: ApiDef): Map<string, FieldDef> {
+  const fields = new Map(api.fields.map((field) => [field.fieldId, field]));
+  if (api.kindField) {
+    const options = [...new Set(Array.isArray(api.from) ? api.from : [api.from])];
+    fields.set(api.kindField, { metaKey: "", fieldId: api.kindField, type: "select", options });
+  }
+  return fields;
+}
+
+/**
+ * Keeps the durable IR representation intact while matching microCMS's write API.
+ * Relations are sent later through their dedicated PATCH path and never enter here.
+ */
+function normalizePayload(document: LegacyDocument, payload: Record<string, unknown>, config: MigrationConfig | undefined, warnings: ImportWarning[]): Record<string, unknown> {
+  const definition = config?.apis[document.api];
+  // --config is opt-in so existing import behavior remains unchanged.
+  if (!definition) return payload;
+  const fields = fieldsForApi(definition);
+  const normalized: Record<string, unknown> = {};
+  for (const [fieldId, value] of Object.entries(payload)) {
+    const field = fields.get(fieldId);
+    // Empty strings are unset values in microCMS, regardless of field type.
+    // A number-field empty string is also reported because it is a rejected value.
+    if (value === "") {
+      if (field?.type === "number") warnings.push({ api: document.api, contentId: document.contentId, fieldId, value, reason: "invalidNumber" });
+      continue;
+    }
+    if (!field) { normalized[fieldId] = value; continue; }
+    if (field.options && typeof value === "string") {
+      if (!field.options.includes(value)) {
+        warnings.push({ api: document.api, contentId: document.contentId, fieldId, value, reason: "invalidSelectOption" });
+        continue;
+      }
+      normalized[fieldId] = [value];
+      continue;
+    }
+    if (field.type === "number" && typeof value === "string") {
+      const number = Number(value);
+      if (value.trim() === "" || Number.isNaN(number)) {
+        warnings.push({ api: document.api, contentId: document.contentId, fieldId, value, reason: "invalidNumber" });
+        continue;
+      }
+      normalized[fieldId] = number;
+      continue;
+    }
+    normalized[fieldId] = value;
+  }
+  return normalized;
 }
 
 async function readDocuments(irDir: string): Promise<LegacyDocument[]> {
@@ -111,10 +166,10 @@ export async function importDocuments(options: ImportOptions): Promise<ImportRes
   const selectedContentIds = new Set(documents.map((document) => document.contentId));
   const statePath = join(options.irDir, "import-state.json");
   const state = await readState(statePath);
-  const result: ImportResult = { total: documents.length, wouldUpload: 0, uploaded: 0, skipped: 0, oversized: 0, dryRun: Boolean(options.dryRun), failures: [], totals: [] };
+  const result: ImportResult = { total: documents.length, wouldUpload: 0, uploaded: 0, skipped: 0, oversized: 0, dryRun: Boolean(options.dryRun), failures: [], warnings: [], totals: [] };
   const candidates: Array<{ document: LegacyDocument; payload: Record<string, unknown>; checksum: string }> = [];
   for (const document of documents) {
-    const payload = documentPayload(document);
+    const payload = normalizePayload(document, documentPayload(document), options.config, result.warnings);
     // parse calculates this after relation resolution; preserve that durable IR checksum in state.
     const payloadChecksum = document.payloadChecksum;
     if (state[document.contentId] === payloadChecksum) { result.skipped += 1; continue; }
@@ -133,7 +188,7 @@ export async function importDocuments(options: ImportOptions): Promise<ImportRes
     const url = `${root}/${encodeURIComponent(candidate.document.api)}/${encodeURIComponent(candidate.document.contentId)}`;
     try {
       const response = await requestWithRetry(fetchImpl, limiter, url, { method: "PUT", headers, body: JSON.stringify(candidate.payload) }, sleep);
-      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      if (!response.ok) throw new Error(`HTTP ${response.status}: ${(await response.text().catch(() => "")).slice(0, 300)}`);
       state[candidate.document.contentId] = candidate.checksum;
       result.uploaded += 1;
     } catch (error: unknown) { result.failures.push({ api: candidate.document.api, contentId: candidate.document.contentId, phase: "upsert", message: error instanceof Error ? error.message : String(error) }); }
@@ -147,7 +202,7 @@ export async function importDocuments(options: ImportOptions): Promise<ImportRes
     const url = `${root}/${encodeURIComponent(document.api)}/${encodeURIComponent(document.contentId)}`;
     try {
       const response = await requestWithRetry(fetchImpl, limiter, url, { method: "PATCH", headers, body: JSON.stringify(Object.fromEntries(relationValues)) }, sleep);
-      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      if (!response.ok) throw new Error(`HTTP ${response.status}: ${(await response.text().catch(() => "")).slice(0, 300)}`);
     } catch (error: unknown) { result.failures.push({ api: document.api, contentId: document.contentId, phase: "relation", message: error instanceof Error ? error.message : String(error) }); }
   }
   await writeFile(statePath, `${JSON.stringify(state, null, 2)}\n`);
