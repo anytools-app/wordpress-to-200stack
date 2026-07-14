@@ -76,15 +76,28 @@ npm run wpkit -- parse --config ../mapping.config.ts -o ../_scratch/ir
 
 ### 4. media(ゲート2: missing を人が確認)
 
+**画像の配信方針(全案件共通)**: 外部ストレージ(R2 等)は使わない。画像は次の二本立てにする。
+
+1. **サイト同梱 + 200stack 配信**(本文 HTML 内の画像・テーマ装飾画像):
+   ビルド時に `wpkit media transform` で webp 化(既定 q75・max-width 1600・アップスケールなし、
+   gif は素通し)して `public/media/` に同梱する。**必要十分なサイズ・軽量フォーマットで置く**のが原則
+   (実測で jpg/png → webp は総量 56% 減)
+2. **microCMS 添付 + 画像 API 配信**(CMS で編集し続ける画像フィールド: アイキャッチ・ギャラリー等):
+   メディアアップロード API(**Team プラン以上・1ファイル5MB**)で移行し、配信 URL に
+   `?fm=webp&q=75`(+表示幅×2 の `w`)を必ず付ける。`auto=format` は非対応なので明示指定
+
 ```bash
-npm run wpkit -- media pull --ir ../_scratch/ir -o ../_scratch/media   # まず --limit 30
-npm run wpkit -- media push --media ../_scratch/media --bucket <R2バケット> --endpoint <R2 endpoint> --dry-run
+npm run wpkit -- media transform --ir ../_scratch/ir --cache ../_scratch/remote-cache \
+  --out ../site/public/media --manifest ../site/src/data/media-manifest.json --dry-run  # missing を確認 → 本実行
 ```
 
-- **200stack はリクエスト従量課金のため、画像は R2 + カスタムドメイン(例: media.<domain>)に分離**し、
-  HTML/CSS/JS だけを 200stack に置くのが原則(画像リクエストが課金を支配する)
-- パス構造 `/wp-content/uploads/...` を維持(本文書き換えがホスト置換のみで済む)
-- R2 認証は AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY(region auto)。秘密情報は delegate 規約に従い委任先へ渡さない
+- transform は fetch-once の remote-cache だけを読む(キャッシュミスはネットワークに出ず manifest の
+  `missing` に列挙 → 司令塔が回収してから再実行)。派生サイズ URL(`-WxH.ext`)は原本に解決せず
+  独立資産として扱う(レンダリング寸法を変えないため)
+- サイト側はテンプレの `src/lib/media.ts`(`mediaUrl()` / `rewriteBodyMedia()`)が manifest を引いて
+  ローカル webp / microCMS 画像 API パラメータに解決する。**画像の src と転送量だけを変え、
+  レンダリング寸法は 1px も変えない**(fidelity 承認を壊さない)
+- `media pull` / `media push`(S3 互換)は外部ストレージが指定された例外案件向けに残置
 - 見落としがちな回収物: テーマ外の `/docs/*.pdf` 等の添付、ページ限定 CSS(archive 全ページの
   `link[rel=stylesheet]` を集計してから回収リストを作る)
 
@@ -103,7 +116,7 @@ npm run wpkit -- import --ir ../_scratch/ir --dry-run   # oversized 0 を確認 
 
 - `cp -R kit/templates/next-app <案件>/site` → `WPKIT_DATA_SOURCE=ir` で microCMS 未契約でもビルド可
 - **デザイン検証中は dev 用 config(mediaHost=現行ドメイン)で parse した ir-dev を使い、
-  本番切替時に本 config で parse し直す**(R2 未配置でも画像が見える)
+  本番切替時に本 config で parse し直す**(media transform 前でも画像が見える)
 - テンプレ実装指示書は `templates.md` の雛形を使用。**指示書に必ず入れる規律**(実案件で確立):
   1. 原文 page.html との DOM タグ実体数一致を完了条件にする(substring 数は RSC ペイロードで2倍に見える)
   2. jQuery プラグイン(imgLiquid/slick/lity)の見た目は追加 CSS で代替(テーマ CSS は編集禁止)
@@ -151,11 +164,11 @@ npm run wpkit -- verify --old ../_scratch/archive --new ../site/out -o ../_scrat
 
 ### 8. 200stack 公開
 
-1. 本番 config で `parse` し直し → R2 へ media push(フル)→ `site/` を本番ビルド
-2. 200stack でサイト作成 → GitHub 連携(push で自動ビルド)
+1. 本番 config で `parse` し直し → `media transform`(フル)+ CMS 編集対象画像は microCMS メディアへ移行 → `site/` を本番ビルド
+2. 200stack でサイト作成 → GitHub 連携(push で自動ビルド。変換済み `public/media/` はリポジトリに含める)
 3. **microCMS の webhook → 200stack の webhook 受信 API** を接続(コンテンツ更新で自動再デプロイ)
 4. リダイレクト設定: archive の redirects 記録から生成した 301 表(kit の meta.json → `redirects.txt`)を 200stack に設定
-5. カスタムドメイン+SSL(本体と media の両方)→ DNS 切替
+5. カスタムドメイン+SSL → DNS 切替
 6. 切替チェックリスト(`templates.md`)に従う: コンテンツ凍結 → 最終 WXR 差分移行 → 監視 → 旧環境はロールバック可能に保持
 
 ## 委任・記録の規約

@@ -1,12 +1,15 @@
+import { createHash } from "node:crypto";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { HeadObjectCommand, PutObjectCommand } from "@aws-sdk/client-s3";
+import sharp from "sharp";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { collectMediaUrls, pullMedia, type MediaManifestEntry } from "../src/media/pull.js";
 import { pushMedia } from "../src/media/push.js";
+import { collectReferencedMediaUrls, transformMedia } from "../src/media/transform.js";
 
 const temporary: string[] = [];
 async function tempDir(): Promise<string> { const path = await mkdtemp(join(tmpdir(), "wpkit-media-")); temporary.push(path); return path; }
@@ -43,6 +46,70 @@ describe("wpkit media pull", () => {
     expect(second.skipped).toBe(3);
   });
 });
+
+function cacheKey(url: string): string { return createHash("sha1").update(url).digest("hex"); }
+async function cacheImage(cacheDir: string, url: string, body: Buffer): Promise<void> {
+  const key = cacheKey(url);
+  await Promise.all([
+    writeFile(join(cacheDir, `${key}.bin`), body),
+    writeFile(join(cacheDir, `${key}.json`), JSON.stringify({ url, status: 200, contentType: "image/test" })),
+  ]);
+}
+
+describe("wpkit media transform", () => {
+  it("collects document references only, transforms cache hits, and records cache misses without fetching", async () => {
+    const root = await tempDir(); const irDir = join(root, "ir"); const cacheDir = join(root, "cache"); const outDir = join(root, "public", "media"); const manifestPath = join(root, "src", "data", "media-manifest.json");
+    await (await import("node:fs/promises")).mkdir(irDir, { recursive: true });
+    await (await import("node:fs/promises")).mkdir(cacheDir, { recursive: true });
+    const jpg = "https://legacy.example.com/wp-content/uploads/2024/large.jpg";
+    const png = "https://legacy.example.com/wp-content/uploads/2024/field.png";
+    const gif = "https://legacy.example.com/wp-content/uploads/2024/animated.gif";
+    const webp = "https://legacy.example.com/wp-content/uploads/2024/already.webp";
+    const missing = "https://legacy.example.com/wp-content/uploads/2024/missing.jpg";
+    const ignoredAttachment = "https://legacy.example.com/wp-content/uploads/2024/not-referenced.jpg";
+    await writeFile(join(irDir, "documents.ndjson"), `${JSON.stringify({
+      featuredImage: jpg,
+      fields: { image: png },
+      repeaters: { gallery: [{ image: gif }, { image: webp }] },
+      content: { legacyBodyHtml: `<img src="${missing}" srcset="${jpg} 1x">` },
+      assets: [ignoredAttachment],
+    })}\n`);
+    const jpgBody = await sharp({ create: { width: 20, height: 10, channels: 3, background: "#336699" } }).jpeg().toBuffer();
+    const pngBody = await sharp({ create: { width: 8, height: 6, channels: 4, background: "#ff0000" } }).png().toBuffer();
+    const gifBody = Buffer.from("R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==", "base64");
+    const webpBody = await sharp({ create: { width: 20, height: 10, channels: 3, background: "#00ff00" } }).webp().toBuffer();
+    await Promise.all([cacheImage(cacheDir, jpg, jpgBody), cacheImage(cacheDir, png, pngBody), cacheImage(cacheDir, gif, gifBody), cacheImage(cacheDir, webp, webpBody)]);
+
+    expect(collectReferencedMediaUrls([{ featuredImage: jpg, fields: { image: png }, repeaters: { gallery: [{ image: gif }] }, content: { legacyBodyHtml: `<img src="${missing}">` } }])).toEqual([gif, png, jpg, missing]);
+    const result = await transformMedia({ irDir, cacheDir, outDir, manifestPath, maxWidth: 10, quality: 70 });
+
+    expect(result.manifest.summary).toMatchObject({ referenced: 5, cached: 4, missing: 1, converted: 3, copied: 1 });
+    expect(result.manifest.missing).toEqual([missing]);
+    expect(result.entries["/wp-content/uploads/2024/large.jpg"]).toMatchObject({ local: "/media/wp-content/uploads/2024/large.jpg.webp", width: 10, height: 5 });
+    expect(result.entries["/wp-content/uploads/2024/animated.gif"]).toMatchObject({ local: "/media/wp-content/uploads/2024/animated.gif", width: 1, height: 1, bytes: gifBody.byteLength });
+    expect(await sharp(await readFile(join(outDir, "wp-content/uploads/2024/large.jpg.webp"))).metadata()).toMatchObject({ format: "webp", width: 10, height: 5 });
+    expect(await readFile(join(outDir, "wp-content/uploads/2024/animated.gif"))).toEqual(gifBody);
+    expect(await sharp(await readFile(join(outDir, "wp-content/uploads/2024/already.webp"))).metadata()).toMatchObject({ format: "webp", width: 10, height: 5 });
+    expect(JSON.parse(await readFile(manifestPath, "utf8"))).toMatchObject({ missing: [missing] });
+
+    const rerun = await transformMedia({ irDir, cacheDir, outDir, manifestPath, maxWidth: 10, quality: 70 });
+    expect(rerun.manifest.summary).toMatchObject({ skipped: 4, converted: 0, copied: 0 });
+  });
+
+  it("prints a complete planned manifest without creating output during dry-run", async () => {
+    const root = await tempDir(); const irDir = join(root, "ir"); const cacheDir = join(root, "cache"); const outDir = join(root, "public", "media"); const manifestPath = join(root, "src", "data", "media-manifest.json");
+    await (await import("node:fs/promises")).mkdir(irDir, { recursive: true });
+    await (await import("node:fs/promises")).mkdir(cacheDir, { recursive: true });
+    const url = "https://legacy.example.com/wp-content/uploads/2024/dry.jpg";
+    await writeFile(join(irDir, "documents.ndjson"), `${JSON.stringify({ featuredImage: url, fields: {}, repeaters: {}, content: { legacyBodyHtml: "" } })}\n`);
+    await cacheImage(cacheDir, url, await sharp({ create: { width: 2, height: 2, channels: 3, background: "#ffffff" } }).jpeg().toBuffer());
+    const result = await transformMedia({ irDir, cacheDir, outDir, manifestPath, dryRun: true });
+    expect(result.entries["/wp-content/uploads/2024/dry.jpg"]).toMatchObject({ local: "/media/wp-content/uploads/2024/dry.jpg.webp" });
+    await expect(readFile(manifestPath, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(readFile(join(outDir, "wp-content/uploads/2024/dry.jpg.webp"))).rejects.toMatchObject({ code: "ENOENT" });
+  });
+});
+
 
 describe("wpkit media push", () => {
   it("skips identical remote objects and reports only changes during dry-run", async () => {

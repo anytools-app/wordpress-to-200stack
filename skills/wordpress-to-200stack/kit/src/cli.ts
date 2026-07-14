@@ -8,6 +8,7 @@ import { archiveSite } from "./archive/index.js";
 import { parseWxr } from "./core/wxr.js";
 import { pullMedia } from "./media/pull.js";
 import { pushMedia } from "./media/push.js";
+import { transformMedia } from "./media/transform.js";
 import { importDocuments } from "./microcms/import.js";
 import { writeSchemas } from "./microcms/schema.js";
 import { loadMigrationConfig, parseConfigFile } from "./parse/index.js";
@@ -22,6 +23,11 @@ const count = (value: string): number => {
 const positiveCount = (value: string): number => {
   const parsed = count(value);
   if (parsed === 0) throw new Error(`1 以上の整数を指定してください: ${value}`);
+  return parsed;
+};
+const positiveNumber = (value: string): number => {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed <= 0) throw new Error(`0 より大きい数値を指定してください: ${value}`);
   return parsed;
 };
 const pacingProgress = (command: string) => (stats: { intervalMs: number; concurrency: number; baselineMs?: number }) => {
@@ -81,6 +87,22 @@ media
   .action(async (options: { ir: string; media: string; concurrency: number; rateStartMs: number; minIntervalMs: number; adaptive: boolean; limit?: number; includeDerived?: boolean }) => {
     const result = await pullMedia({ irDir: options.ir, mediaDir: options.media, concurrency: options.concurrency, startIntervalMs: options.rateStartMs, minIntervalMs: options.minIntervalMs, adaptive: options.adaptive, limit: options.limit, includeDerived: options.includeDerived, onPacerStats: pacingProgress("media pull") });
     console.log(JSON.stringify({ ok: result.ok, missing: result.missing, invalid: result.invalid, skipped: result.skipped, mediaDir: options.media }));
+  });
+
+media
+  .command("transform")
+  .requiredOption("--ir <irDir>", "parse output directory")
+  .requiredOption("--cache <cacheDir>", "fetch-once remote-cache directory")
+  .requiredOption("--out <outDir>", "site public/media output directory")
+  .requiredOption("--manifest <manifestPath>", "site media-manifest.json output path")
+  .option("--max-width <width>", "maximum output width", positiveCount, 1600)
+  .option("--quality <quality>", "WebP quality for JPEG/PNG", positiveNumber, 75)
+  .option("--dry-run", "inspect cache-backed output without writing files")
+  .action(async (options: { ir: string; cache: string; out: string; manifest: string; maxWidth: number; quality: number; dryRun?: boolean }) => {
+    if (options.quality > 100) throw new Error(`quality は 100 以下を指定してください: ${options.quality}`);
+    const result = await transformMedia({ irDir: options.ir, cacheDir: options.cache, outDir: options.out, manifestPath: options.manifest, maxWidth: options.maxWidth, quality: options.quality, dryRun: options.dryRun });
+    // dry-run は生成予定の manifest そのものを stdout に出し、司令塔が欠損 URL をそのまま扱えるようにする。
+    console.log(JSON.stringify(options.dryRun ? result.manifest : { summary: result.manifest.summary, manifest: options.manifest }));
   });
 
 const schema = program.command("schema").description("generate microCMS import schemas");
