@@ -17,8 +17,8 @@ function selectItems(field: Pick<FieldDef, "options">): Array<{ id: string; valu
 function fieldSchema(field: Pick<FieldDef, "fieldId" | "label" | "type" | "options">, required = false): SchemaField {
   const common = { fieldId: field.fieldId, name: field.label ?? field.fieldId, description: null, required };
   switch (field.type) {
-    case "string":
-    case "image": return { ...common, kind: "text", textSizeLimitValidation: null, patternMatchValidation: null, isUnique: false };
+    case "string": return { ...common, kind: "text", textSizeLimitValidation: null, patternMatchValidation: null, isUnique: false };
+    case "image": return { ...common, kind: "image" };
     case "text":
     case "html": return { ...common, kind: "textArea", textSizeLimitValidation: null, patternMatchValidation: null };
     case "number": return { ...common, kind: "number", numberSizeLimitValidation: null };
@@ -84,7 +84,7 @@ export async function writeSchemas(config: MigrationConfig, schemaDir = "./micro
     "1. microCMS 管理画面で API ごとに対応する `*.schema.json` を APIスキーマのインポートから読み込む。",
     "2. relation フィールドはインポート後に参照先 API を管理画面で手動設定する（公式インポート仕様では参照先が復元されない）。",
     ...(relationApis.length ? [`3. 対象 API: ${relationApis.join(", ")}`] : []),
-    "4. 画像フィールドと featuredImage は microCMS メディアではなく R2 URL の text として扱う。",
+    "4. 画像フィールドと featuredImage は microCMS メディアの配信 URL を設定する。",
     "",
   ].join("\n");
   await writeFile(join(schemaDir, "README.md"), checklist);

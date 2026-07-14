@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
@@ -8,6 +9,8 @@ import type { LegacyDocument } from "../parse/index.js";
 
 type FetchLike = typeof fetch;
 type ImportState = Record<string, string>;
+export type MediaMapEntry = { assetUrl: string; uploadedAt?: string };
+type MediaMap = Record<string, MediaMapEntry>;
 export type ImportOptions = {
   irDir: string;
   only?: string;
@@ -18,11 +21,13 @@ export type ImportOptions = {
   apiKey?: string;
   fetchImpl?: FetchLike;
   sleep?: (milliseconds: number) => Promise<void>;
+  /** Path to the state/map written by `wpkit media upload`. Requires `config`. */
+  mediaMapPath?: string;
   /** Optional mapping information used only to normalize the microCMS write payload. */
   config?: MigrationConfig;
 };
 export type ImportFailure = { api: string; contentId: string; phase: "payload" | "upsert" | "relation"; message: string };
-export type ImportWarning = { api: string; contentId: string; fieldId: string; value: unknown; reason: "invalidNumber" | "invalidSelectOption" };
+export type ImportWarning = { api: string; contentId: string; fieldId: string; value: unknown; reason: "invalidNumber" | "invalidSelectOption" | "missingMediaMap" };
 export type ImportResult = {
   total: number; wouldUpload: number; uploaded: number; skipped: number; oversized: number; dryRun: boolean;
   failures: ImportFailure[];
@@ -33,6 +38,7 @@ export type ImportResult = {
 const MAX_PAYLOAD_BYTES = 180 * 1024;
 const delay = (milliseconds: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, milliseconds));
 const byteLength = (value: unknown): number => Buffer.byteLength(JSON.stringify(value), "utf8");
+const checksumPayload = (payload: Record<string, unknown>): string => createHash("sha256").update(JSON.stringify(payload)).digest("hex");
 
 class WriteRateLimiter {
   private tail = Promise.resolve();
@@ -81,13 +87,51 @@ function fieldsForApi(api: ApiDef): Map<string, FieldDef> {
  * Keeps the durable IR representation intact while matching microCMS's write API.
  * Relations are sent later through their dedicated PATCH path and never enter here.
  */
-function normalizePayload(document: LegacyDocument, payload: Record<string, unknown>, config: MigrationConfig | undefined, warnings: ImportWarning[]): Record<string, unknown> {
+function replaceImage(value: unknown, mediaMap: MediaMap, document: LegacyDocument, fieldId: string, warnings: ImportWarning[]): unknown {
+  if (typeof value !== "string" || value === "") return value;
+  const mapped = mediaMap[value]?.assetUrl;
+  if (mapped) return mapped;
+  warnings.push({ api: document.api, contentId: document.contentId, fieldId, value, reason: "missingMediaMap" });
+  return undefined;
+}
+
+function replaceMappedImages(document: LegacyDocument, payload: Record<string, unknown>, definition: ApiDef, mediaMap: MediaMap, warnings: ImportWarning[]): Record<string, unknown> {
+  const mapped = { ...payload };
+  if (definition.featuredImage && "featuredImage" in mapped) {
+    const value = replaceImage(mapped.featuredImage, mediaMap, document, "featuredImage", warnings);
+    if (value === undefined) delete mapped.featuredImage; else mapped.featuredImage = value;
+  }
+  for (const field of definition.fields.filter((item) => item.type === "image")) {
+    if (!(field.fieldId in mapped)) continue;
+    const value = replaceImage(mapped[field.fieldId], mediaMap, document, field.fieldId, warnings);
+    if (value === undefined) delete mapped[field.fieldId]; else mapped[field.fieldId] = value;
+  }
+  for (const repeater of definition.repeaters ?? []) {
+    const imageColumns = repeater.columns.filter((column) => column.type === "image");
+    const rows = mapped[repeater.fieldId];
+    if (!imageColumns.length || !Array.isArray(rows)) continue;
+    mapped[repeater.fieldId] = rows.map((row) => {
+      if (!row || typeof row !== "object" || Array.isArray(row)) return row;
+      const next = { ...(row as Record<string, unknown>) };
+      for (const column of imageColumns) {
+        if (!(column.fieldId in next)) continue;
+        const value = replaceImage(next[column.fieldId], mediaMap, document, `${repeater.fieldId}.${column.fieldId}`, warnings);
+        if (value === undefined) delete next[column.fieldId]; else next[column.fieldId] = value;
+      }
+      return next;
+    });
+  }
+  return mapped;
+}
+
+function normalizePayload(document: LegacyDocument, payload: Record<string, unknown>, config: MigrationConfig | undefined, warnings: ImportWarning[], mediaMap?: MediaMap): Record<string, unknown> {
   const definition = config?.apis[document.api];
   // --config is opt-in so existing import behavior remains unchanged.
   if (!definition) return payload;
   const fields = fieldsForApi(definition);
+  const imageMappedPayload = mediaMap ? replaceMappedImages(document, payload, definition, mediaMap, warnings) : payload;
   const normalized: Record<string, unknown> = {};
-  for (const [fieldId, value] of Object.entries(payload)) {
+  for (const [fieldId, value] of Object.entries(imageMappedPayload)) {
     const field = fields.get(fieldId);
     // Empty strings are unset values in microCMS, regardless of field type.
     // A number-field empty string is also reported because it is a rejected value.
@@ -135,6 +179,20 @@ async function readState(path: string): Promise<ImportState> {
     throw new Error(`import-state.json を読み取れません: ${error instanceof Error ? error.message : String(error)}`);
   }
 }
+async function readMediaMap(path: string): Promise<MediaMap> {
+  try {
+    const parsed = JSON.parse(await readFile(path, "utf8")) as unknown;
+    if (!parsed || Array.isArray(parsed) || typeof parsed !== "object") throw new Error("object ではありません");
+    const entries = Object.entries(parsed).filter((entry): entry is [string, MediaMapEntry] => {
+      const value = entry[1];
+      return Boolean(value) && typeof value === "object" && !Array.isArray(value) && typeof (value as MediaMapEntry).assetUrl === "string";
+    });
+    if (entries.length !== Object.keys(parsed).length) throw new Error("assetUrl を持たないエントリがあります");
+    return Object.fromEntries(entries);
+  } catch (error: unknown) {
+    throw new Error(`media-map を読み取れません: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
 
 async function requestWithRetry(fetchImpl: FetchLike, limiter: WriteRateLimiter, url: string, init: RequestInit, sleep: (milliseconds: number) => Promise<void>): Promise<Response> {
   let last: Response | undefined;
@@ -162,6 +220,8 @@ export async function importDocuments(options: ImportOptions): Promise<ImportRes
   const serviceDomain = options.serviceDomain ?? process.env.MICROCMS_SERVICE_DOMAIN;
   const apiKey = options.apiKey ?? process.env.MICROCMS_API_KEY;
   if (!options.dryRun && (!serviceDomain || !apiKey)) throw new Error("MICROCMS_SERVICE_DOMAIN と MICROCMS_API_KEY が必要です");
+  if (options.mediaMapPath && !options.config) throw new Error("--media-map には --config が必要です");
+  const mediaMap = options.mediaMapPath ? await readMediaMap(options.mediaMapPath) : undefined;
   const documents = (await readDocuments(options.irDir)).filter((document) => (!options.only || document.api === options.only) && (options.sourceId === undefined || document.source.wpId === options.sourceId));
   const selectedContentIds = new Set(documents.map((document) => document.contentId));
   const statePath = join(options.irDir, "import-state.json");
@@ -169,9 +229,11 @@ export async function importDocuments(options: ImportOptions): Promise<ImportRes
   const result: ImportResult = { total: documents.length, wouldUpload: 0, uploaded: 0, skipped: 0, oversized: 0, dryRun: Boolean(options.dryRun), failures: [], warnings: [], totals: [] };
   const candidates: Array<{ document: LegacyDocument; payload: Record<string, unknown>; checksum: string }> = [];
   for (const document of documents) {
-    const payload = normalizePayload(document, documentPayload(document), options.config, result.warnings);
-    // parse calculates this after relation resolution; preserve that durable IR checksum in state.
-    const payloadChecksum = document.payloadChecksum;
+    const payload = normalizePayload(document, documentPayload(document), options.config, result.warnings, mediaMap);
+    // Without --media-map retain the durable IR checksum exactly. With it, the
+    // map changes the write payload, so use that payload as the idempotency key
+    // and do not let an earlier text-field import suppress the media migration.
+    const payloadChecksum = mediaMap ? checksumPayload(payload) : document.payloadChecksum;
     if (state[document.contentId] === payloadChecksum) { result.skipped += 1; continue; }
     if (byteLength(payload) > MAX_PAYLOAD_BYTES) { result.oversized += 1; result.failures.push({ api: document.api, contentId: document.contentId, phase: "payload", message: `payload が ${MAX_PAYLOAD_BYTES} bytes を超えています` }); continue; }
     candidates.push({ document, payload, checksum: payloadChecksum });

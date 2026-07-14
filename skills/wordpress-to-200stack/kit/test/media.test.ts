@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 
 import { HeadObjectCommand, PutObjectCommand } from "@aws-sdk/client-s3";
 import sharp from "sharp";
@@ -10,6 +10,8 @@ import { afterEach, describe, expect, it } from "vitest";
 import { collectMediaUrls, pullMedia, type MediaManifestEntry } from "../src/media/pull.js";
 import { pushMedia } from "../src/media/push.js";
 import { collectReferencedMediaUrls, transformMedia } from "../src/media/transform.js";
+import { collectCmsImageUrls, uploadMedia } from "../src/media/upload.js";
+import type { MigrationConfig } from "../src/config.js";
 
 const temporary: string[] = [];
 async function tempDir(): Promise<string> { const path = await mkdtemp(join(tmpdir(), "wpkit-media-")); temporary.push(path); return path; }
@@ -110,7 +112,6 @@ describe("wpkit media transform", () => {
   });
 });
 
-
 describe("wpkit media push", () => {
   it("skips identical remote objects and reports only changes during dry-run", async () => {
     const mediaDir = await tempDir();
@@ -130,5 +131,81 @@ describe("wpkit media push", () => {
     const result = await pushMedia({ mediaDir, bucket: "bucket", prefix: "assets", dryRun: true, client });
     expect(result).toEqual({ uploaded: ["assets/wp-content/uploads/b.jpg"], skipped: ["assets/wp-content/uploads/a.jpg"], dryRun: true });
     expect(commands.filter((command) => command instanceof PutObjectCommand)).toHaveLength(0);
+  });
+});
+
+const mediaConfig: MigrationConfig = {
+  wxr: "fixture.xml",
+  site: { origin: "https://old.test", mediaHost: "https://media.test" },
+  apis: {
+    cars: {
+      from: "cars", featuredImage: true,
+      fields: [{ metaKey: "card", fieldId: "card", type: "image" }, { metaKey: "name", fieldId: "name", type: "string" }],
+      repeaters: [{ fieldId: "gallery", columns: [{ metaKey: "photo", fieldId: "photo", type: "image" }, { metaKey: "caption", fieldId: "caption", type: "string" }] }],
+    },
+  },
+};
+function uploadDocument(urls: { featured?: string; card?: string; gallery?: string[] }): Record<string, unknown> {
+  return {
+    source: { wpId: 1, postType: "cars", status: "publish" }, api: "cars", contentId: "cars-1", route: { legacyUrl: "https://old.test/cars/1", path: "/cars/1", segments: ["cars", "1"], trailingSlash: false },
+    content: { title: "car", legacyBodyHtml: `<img src="${urls.featured ?? "https://old.test/body.jpg"}">`, excerpt: "", publishedAt: "2026-01-01" }, seo: {}, taxonomies: [],
+    fields: { card: urls.card, name: "ignore" }, repeaters: { gallery: (urls.gallery ?? []).map((photo) => ({ photo, caption: "caption" })) }, relations: [], featuredImage: urls.featured, assets: ["https://old.test/assets-only.jpg"], payloadChecksum: "checksum",
+  };
+}
+
+describe("wpkit media upload", () => {
+  it("uploads CMS image fields from cache only, uses multipart, skips mapped entries, and spaces requests", async () => {
+    const root = await tempDir(); const irDir = join(root, "ir"); const cacheDir = join(root, "cache"); const mapPath = join(root, "state", "map.json");
+    await (await import("node:fs/promises")).mkdir(irDir, { recursive: true }); await (await import("node:fs/promises")).mkdir(cacheDir, { recursive: true }); await (await import("node:fs/promises")).mkdir(dirname(mapPath), { recursive: true });
+    const featured = "https://old.test/wp-content/uploads/a.jpg"; const card = "https://old.test/wp-content/uploads/b.jpg"; const gallery = "https://old.test/wp-content/uploads/c.jpg";
+    await writeFile(join(irDir, "documents.ndjson"), `${JSON.stringify(uploadDocument({ featured, card, gallery: [gallery] }))}\n`);
+    await Promise.all([cacheImage(cacheDir, featured, Buffer.from("featured")), cacheImage(cacheDir, card, Buffer.from("card")), cacheImage(cacheDir, gallery, Buffer.from("gallery"))]);
+    await writeFile(mapPath, JSON.stringify({ [card]: { assetUrl: "https://images.microcms-assets.io/assets/existing", uploadedAt: "2026-01-01T00:00:00.000Z" } }));
+    const calls: Array<{ url: string; init?: RequestInit }> = []; const sleeps: number[] = [];
+    const result = await uploadMedia({ irDir, cacheDir, config: mediaConfig, mapPath, serviceDomain: "service", apiKey: "key", now: () => new Date("2026-07-15T00:00:00.000Z"), sleep: async (ms) => { sleeps.push(ms); }, fetchImpl: async (url, init) => { calls.push({ url: String(url), init }); return new Response(JSON.stringify({ url: `https://images.microcms-assets.io/assets/${calls.length}` }), { headers: { "content-type": "application/json" } }); } });
+    expect(collectCmsImageUrls([uploadDocument({ featured, card, gallery: [gallery] }) as never], mediaConfig)).toEqual([featured, card, gallery]);
+    expect(result).toMatchObject({ referenced: 3, cached: 2, skipped: 1, uploaded: 2, missing: [], failures: [] });
+    expect(calls.map((call) => call.url)).toEqual(["https://service.microcms-management.io/api/v1/media", "https://service.microcms-management.io/api/v1/media"]);
+    expect(calls[0]?.init?.headers).toEqual({ "X-MICROCMS-API-KEY": "key" });
+    expect(calls[0]?.init?.body).toBeInstanceOf(FormData);
+    expect(sleeps).toHaveLength(1);
+    const map = JSON.parse(await readFile(mapPath, "utf8"));
+    expect(map[featured]).toMatchObject({ assetUrl: "https://images.microcms-assets.io/assets/1" });
+    expect(map[gallery]).toMatchObject({ assetUrl: "https://images.microcms-assets.io/assets/2" });
+  });
+
+  it("reports cache misses and dry-run statistics without auth or requests", async () => {
+    const root = await tempDir(); const irDir = join(root, "ir"); const cacheDir = join(root, "cache"); const mapPath = join(root, "map.json");
+    await (await import("node:fs/promises")).mkdir(irDir, { recursive: true }); await (await import("node:fs/promises")).mkdir(cacheDir, { recursive: true });
+    const hit = "https://old.test/wp-content/uploads/hit.jpg"; const missing = "https://old.test/wp-content/uploads/missing.jpg";
+    await writeFile(join(irDir, "documents.ndjson"), `${JSON.stringify(uploadDocument({ featured: hit, card: missing }))}\n`); await cacheImage(cacheDir, hit, Buffer.from("hit"));
+    const result = await uploadMedia({ irDir, cacheDir, config: mediaConfig, mapPath, dryRun: true });
+    expect(result).toMatchObject({ referenced: 2, cached: 1, sourceBytes: 3, missing: [missing], uploaded: 0, dryRun: true });
+    await expect(readFile(mapPath, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it("converts cache files over 5MB to WebP before multipart upload", async () => {
+    const root = await tempDir(); const irDir = join(root, "ir"); const cacheDir = join(root, "cache"); const mapPath = join(root, "map.json");
+    await (await import("node:fs/promises")).mkdir(irDir, { recursive: true }); await (await import("node:fs/promises")).mkdir(cacheDir, { recursive: true });
+    const url = "https://old.test/wp-content/uploads/large.png";
+    await writeFile(join(irDir, "documents.ndjson"), `${JSON.stringify(uploadDocument({ featured: url }))}\n`);
+    const pixels = Buffer.alloc(2100 * 2100 * 3); for (let index = 0; index < pixels.length; index += 1) pixels[index] = (index * 31) % 251;
+    const large = await sharp(pixels, { raw: { width: 2100, height: 2100, channels: 3 } }).png({ compressionLevel: 0 }).toBuffer(); expect(large.byteLength).toBeGreaterThan(5 * 1024 * 1024);
+    await cacheImage(cacheDir, url, large);
+    let uploaded: File | undefined;
+    const result = await uploadMedia({ irDir, cacheDir, config: mediaConfig, mapPath, serviceDomain: "service", apiKey: "key", sleep: async () => undefined, fetchImpl: async (_url, init) => { uploaded = await (init?.body as FormData).get("file") as File; return new Response(JSON.stringify({ url: "https://images.microcms-assets.io/assets/large" }), { headers: { "content-type": "application/json" } }); } });
+    expect(result.oversized).toBe(1); expect(uploaded?.type).toBe("image/webp"); expect(uploaded?.name).toBe("large.webp"); expect((await uploaded?.arrayBuffer())?.byteLength).toBeLessThan(5 * 1024 * 1024);
+  });
+
+  it("does not send a converted image that still exceeds microCMS's 5MB cap", async () => {
+    const root = await tempDir(); const irDir = join(root, "ir"); const cacheDir = join(root, "cache"); const mapPath = join(root, "map.json");
+    await (await import("node:fs/promises")).mkdir(irDir, { recursive: true }); await (await import("node:fs/promises")).mkdir(cacheDir, { recursive: true });
+    const url = "https://old.test/wp-content/uploads/alpha-noise.png";
+    await writeFile(join(irDir, "documents.ndjson"), `${JSON.stringify(uploadDocument({ featured: url }))}\n`);
+    const pixels = Buffer.alloc(2560 * 2560 * 4); let seed = 123456789; for (let index = 0; index < pixels.length; index += 1) { seed = (seed * 1664525 + 1013904223) >>> 0; pixels[index] = seed >>> 24; }
+    await cacheImage(cacheDir, url, await sharp(pixels, { raw: { width: 2560, height: 2560, channels: 4 } }).png({ compressionLevel: 0 }).toBuffer());
+    let calls = 0;
+    const result = await uploadMedia({ irDir, cacheDir, config: mediaConfig, mapPath, serviceDomain: "service", apiKey: "key", fetchImpl: async () => { calls += 1; return new Response(); } });
+    expect(calls).toBe(0); expect(result.uploaded).toBe(0); expect(result.failures).toEqual([expect.objectContaining({ url, message: expect.stringContaining("5MB") })]);
   });
 });

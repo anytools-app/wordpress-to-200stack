@@ -9,6 +9,7 @@ import { parseWxr } from "./core/wxr.js";
 import { pullMedia } from "./media/pull.js";
 import { pushMedia } from "./media/push.js";
 import { transformMedia } from "./media/transform.js";
+import { uploadMedia } from "./media/upload.js";
 import { importDocuments } from "./microcms/import.js";
 import { writeSchemas } from "./microcms/schema.js";
 import { loadMigrationConfig, parseConfigFile } from "./parse/index.js";
@@ -105,6 +106,22 @@ media
     console.log(JSON.stringify(options.dryRun ? result.manifest : { summary: result.manifest.summary, manifest: options.manifest }));
   });
 
+media
+  .command("upload")
+  .requiredOption("--ir <irDir>", "parse output directory")
+  .requiredOption("--cache <cacheDir>", "fetch-once remote-cache directory")
+  .requiredOption("--config <mappingConfig>", "mapping.config.ts path")
+  .requiredOption("--map <mediaMap>", "microCMS media URL map/state path")
+  .option("--only <api>", "upload only one API")
+  .option("--limit <count>", "process only the first N URLs", count)
+  .option("--dry-run", "inspect cache-backed upload candidates without requesting microCMS")
+  .action(async (options: { ir: string; cache: string; config: string; map: string; only?: string; limit?: number; dryRun?: boolean }) => {
+    const config = (await loadMigrationConfig(options.config)).config;
+    const result = await uploadMedia({ irDir: options.ir, cacheDir: options.cache, config, mapPath: options.map, only: options.only, limit: options.limit, dryRun: options.dryRun });
+    console.log(JSON.stringify(result));
+    if (result.failures.length > 0) process.exitCode = 1;
+  });
+
 const schema = program.command("schema").description("generate microCMS import schemas");
 schema
   .command("gen")
@@ -120,13 +137,14 @@ program
   .command("import")
   .requiredOption("--ir <irDir>", "parse output directory")
   .option("--config <mappingConfig>", "mapping.config.ts path (payload normalization)")
+  .option("--media-map <mediaMapPath>", "microCMS media URL map written by media upload (requires --config)")
   .option("--only <api>", "import only one API")
   .option("--source-id <wpId>", "import only one WordPress source ID", positiveCount)
   .option("--dry-run", "show counts without sending requests")
   .option("--concurrency <count>", "parallel request preparation", positiveCount, 1)
-  .action(async (options: { ir: string; config?: string; only?: string; sourceId?: number; dryRun?: boolean; concurrency: number }) => {
+  .action(async (options: { ir: string; config?: string; mediaMap?: string; only?: string; sourceId?: number; dryRun?: boolean; concurrency: number }) => {
     const config = options.config ? (await loadMigrationConfig(options.config)).config : undefined;
-    const result = await importDocuments({ irDir: options.ir, config, only: options.only, sourceId: options.sourceId, dryRun: options.dryRun, concurrency: options.concurrency });
+    const result = await importDocuments({ irDir: options.ir, config, mediaMapPath: options.mediaMap, only: options.only, sourceId: options.sourceId, dryRun: options.dryRun, concurrency: options.concurrency });
     console.log(JSON.stringify(result));
     if (result.failures.length > 0) process.exitCode = 1;
   });

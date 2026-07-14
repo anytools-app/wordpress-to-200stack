@@ -27,7 +27,7 @@ async function writeIr(documents: LegacyDocument[]): Promise<string> {
 function response(body: unknown = {}, status = 200): Response { return new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } }); }
 const normalizationConfig: MigrationConfig = defineMigration({
   wxr: "/tmp/test.xml", site: { origin: "https://old.test", mediaHost: "https://media.test" },
-  apis: { cars: { from: ["staff", "vendors"], kindField: "kind", fields: [{ metaKey: "price", fieldId: "price", type: "number" }, { metaKey: "label", fieldId: "label", type: "string" }] } },
+  apis: { cars: { from: ["staff", "vendors"], kindField: "kind", featuredImage: true, fields: [{ metaKey: "price", fieldId: "price", type: "number" }, { metaKey: "label", fieldId: "label", type: "string" }, { metaKey: "image", fieldId: "vehicleImage", type: "image" }], repeaters: [{ fieldId: "gallery", columns: [{ metaKey: "image", fieldId: "image", type: "image" }] }] } },
 });
 
 describe("wpkit import", () => {
@@ -86,5 +86,36 @@ describe("wpkit import", () => {
       return init?.method === "GET" ? response({ totalCount: 1 }) : response();
     } });
     expect(bodies[0]).not.toHaveProperty("label");
+  });
+
+  it("replaces configured image values from --media-map and drops unmapped values with warnings", async () => {
+    const ir = await writeIr([doc({ fields: { price: 100, vehicleImage: "https://media.test/direct.jpg" }, featuredImage: "https://media.test/featured.jpg", relations: [] })]);
+    const mapPath = join(ir, "media-map.json");
+    // A prior import using text fields must not suppress the media-field migration.
+    await writeFile(join(ir, "import-state.json"), JSON.stringify({ "cars-10": "from-parse" }));
+    await writeFile(mapPath, JSON.stringify({
+      "https://media.test/direct.jpg": { assetUrl: "https://images.microcms-assets.io/assets/direct.jpg", uploadedAt: "2026-07-15T00:00:00.000Z" },
+      "https://media.test/a.jpg": { assetUrl: "https://images.microcms-assets.io/assets/gallery.jpg", uploadedAt: "2026-07-15T00:00:00.000Z" },
+    }));
+    const bodies: Record<string, unknown>[] = [];
+    const result = await importDocuments({ irDir: ir, config: normalizationConfig, mediaMapPath: mapPath, serviceDomain: "service", apiKey: "key", sleep: async () => undefined, fetchImpl: async (_url, init) => {
+      if (init?.method === "PUT") bodies.push(JSON.parse(String(init.body)) as Record<string, unknown>);
+      return init?.method === "GET" ? response({ totalCount: 1 }) : response();
+    } });
+    expect(bodies[0]?.vehicleImage).toBe("https://images.microcms-assets.io/assets/direct.jpg");
+    expect(bodies[0]?.featuredImage).toBeUndefined();
+    expect(bodies[0]?.gallery).toEqual([{ fieldId: "gallery", image: "https://images.microcms-assets.io/assets/gallery.jpg", caption: "A" }]);
+    expect(result.warnings).toContainEqual({ api: "cars", contentId: "cars-10", fieldId: "featuredImage", value: "https://media.test/featured.jpg", reason: "missingMediaMap" });
+  });
+
+  it("keeps legacy image URL payloads when --media-map is omitted", async () => {
+    const ir = await writeIr([doc({ fields: { price: 100, vehicleImage: "https://media.test/direct.jpg" }, featuredImage: "https://media.test/featured.jpg", relations: [] })]);
+    const bodies: Record<string, unknown>[] = [];
+    await importDocuments({ irDir: ir, config: normalizationConfig, serviceDomain: "service", apiKey: "key", sleep: async () => undefined, fetchImpl: async (_url, init) => {
+      if (init?.method === "PUT") bodies.push(JSON.parse(String(init.body)) as Record<string, unknown>);
+      return init?.method === "GET" ? response({ totalCount: 1 }) : response();
+    } });
+    expect(bodies[0]).toMatchObject({ vehicleImage: "https://media.test/direct.jpg", featuredImage: "https://media.test/featured.jpg" });
+    expect((bodies[0]?.gallery as Array<Record<string, unknown>>)[0]?.image).toBe("https://media.test/a.jpg");
   });
 });
