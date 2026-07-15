@@ -9,6 +9,7 @@ import { parseWxr } from "./core/wxr.js";
 import { pullMedia } from "./media/pull.js";
 import { pushMedia } from "./media/push.js";
 import { transformMedia } from "./media/transform.js";
+import { transformStaticMedia } from "./media/transform-static.js";
 import { uploadMedia } from "./media/upload.js";
 import { importDocuments } from "./microcms/import.js";
 import { writeSchemas } from "./microcms/schema.js";
@@ -108,17 +109,34 @@ media
   });
 
 media
+  .command("transform-static")
+  .requiredOption("--dir <siteRootPublicDir>", "site public directory")
+  .requiredOption("--include <pattern>", "asset include pattern (for example wp-content/**)")
+  .requiredOption("--manifest <manifestPath>", "site media manifest JSON path")
+  .option("--cache <cacheDir>", "optional local fetch cache for previously captured theme assets")
+  .option("--max-width <width>", "maximum output width", positiveCount, 1600)
+  .option("--quality <quality>", "WebP quality for JPEG/PNG", positiveNumber, 75)
+  .option("--prune", "delete unreferenced hashed images in the include scope")
+  .option("--dry-run", "inspect output without writing files or the manifest")
+  .action(async (options: { dir: string; include: string; manifest: string; cache?: string; maxWidth: number; quality: number; prune?: boolean; dryRun?: boolean }) => {
+    if (options.quality > 100) throw new Error(`quality は 100 以下を指定してください: ${options.quality}`);
+    console.log(JSON.stringify(await transformStaticMedia({ ...options, manifestPath: options.manifest, cacheDir: options.cache })));
+  });
+
+media
   .command("upload")
   .requiredOption("--ir <irDir>", "parse output directory")
   .requiredOption("--cache <cacheDir>", "fetch-once remote-cache directory")
   .requiredOption("--config <mappingConfig>", "mapping.config.ts path")
   .requiredOption("--map <mediaMap>", "microCMS media URL map/state path")
   .option("--only <api>", "upload only one API")
+  .option("--scope <scope>", "upload scope: fields, body, or all", "all")
   .option("--limit <count>", "process only the first N URLs", count)
   .option("--dry-run", "inspect cache-backed upload candidates without requesting microCMS")
-  .action(async (options: { ir: string; cache: string; config: string; map: string; only?: string; limit?: number; dryRun?: boolean }) => {
+  .action(async (options: { ir: string; cache: string; config: string; map: string; only?: string; scope: "fields" | "body" | "all"; limit?: number; dryRun?: boolean }) => {
+    if (!["fields", "body", "all"].includes(options.scope)) throw new Error(`scope は fields, body, all のいずれかです: ${options.scope}`);
     const config = (await loadMigrationConfig(options.config)).config;
-    const result = await uploadMedia({ irDir: options.ir, cacheDir: options.cache, config, mapPath: options.map, only: options.only, limit: options.limit, dryRun: options.dryRun });
+    const result = await uploadMedia({ irDir: options.ir, cacheDir: options.cache, config, mapPath: options.map, only: options.only, scope: options.scope, limit: options.limit, dryRun: options.dryRun });
     console.log(JSON.stringify(result));
     if (result.failures.length > 0) process.exitCode = 1;
   });

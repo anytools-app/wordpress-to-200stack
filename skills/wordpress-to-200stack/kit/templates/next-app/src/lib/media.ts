@@ -28,6 +28,16 @@ function uploadPathname(value: string): string | undefined {
 /** Replace only manifest-backed WordPress uploads; missing entries deliberately retain the source URL. */
 export function rewriteBodyMedia(html: string): string {
   const rewriteValue = (value: string): string => {
+    try {
+      const url = new URL(value, LEGACY_ORIGIN);
+      if (url.hostname === "images.microcms-assets.io") {
+        url.searchParams.set("fm", "webp");
+        url.searchParams.set("q", "75");
+        return url.toString();
+      }
+    } catch {
+      return value;
+    }
     const pathname = uploadPathname(value);
     return pathname ? localMediaPath(pathname) ?? value : value;
   };

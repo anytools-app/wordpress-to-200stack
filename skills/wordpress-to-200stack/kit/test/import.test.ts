@@ -118,4 +118,23 @@ describe("wpkit import", () => {
     expect(bodies[0]).toMatchObject({ vehicleImage: "https://media.test/direct.jpg", featuredImage: "https://media.test/featured.jpg" });
     expect((bodies[0]?.gallery as Array<Record<string, unknown>>)[0]?.image).toBe("https://media.test/a.jpg");
   });
+
+  it("rewrites legacyBodyHtml src and srcset from --media-map while retaining and warning on missing URLs", async () => {
+    const first = "https://old.test/wp-content/uploads/body.jpg";
+    const second = "https://old.test/wp-content/uploads/body-300x200.jpg";
+    const missing = "https://old.test/wp-content/uploads/missing.jpg";
+    const ir = await writeIr([doc({ content: { title: "Car", legacyBodyHtml: `<img src="${first}" srcset="${second} 1x, ${missing} 2x"><img src="https://old.test/not-upload.jpg">`, excerpt: "", publishedAt: "2026-01-01" }, relations: [] })]);
+    const mapPath = join(ir, "media-map.json");
+    await writeFile(mapPath, JSON.stringify({
+      [first]: { assetUrl: "https://images.microcms-assets.io/assets/body.jpg", uploadedAt: "2026-07-15T00:00:00.000Z" },
+      [second]: { assetUrl: "https://images.microcms-assets.io/assets/body-300x200.jpg", uploadedAt: "2026-07-15T00:00:00.000Z" },
+    }));
+    const bodies: Record<string, unknown>[] = [];
+    const result = await importDocuments({ irDir: ir, config: normalizationConfig, mediaMapPath: mapPath, serviceDomain: "service", apiKey: "key", sleep: async () => undefined, fetchImpl: async (_url, init) => {
+      if (init?.method === "PUT") bodies.push(JSON.parse(String(init.body)) as Record<string, unknown>);
+      return init?.method === "GET" ? response({ totalCount: 1 }) : response();
+    } });
+    expect(bodies[0]?.legacyBodyHtml).toBe(`<img src="https://images.microcms-assets.io/assets/body.jpg" srcset="https://images.microcms-assets.io/assets/body-300x200.jpg 1x, ${missing} 2x"><img src="https://old.test/not-upload.jpg">`);
+    expect(result.warnings).toContainEqual({ api: "cars", contentId: "cars-10", fieldId: "legacyBodyHtml", value: missing, reason: "missingMediaMap" });
+  });
 });

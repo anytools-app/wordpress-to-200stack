@@ -13,6 +13,10 @@ const UPLOAD_INTERVAL_MS = 500;
 export type MediaMapEntry = { assetUrl: string; uploadedAt: string };
 export type MediaMap = Record<string, MediaMapEntry>;
 export type MediaUploadResult = {
+  /** Unique configured image-field references before cross-scope deduplication. */
+  fields: number;
+  /** Unique uploads URLs found in legacyBodyHtml before cross-scope deduplication. */
+  body: number;
   referenced: number;
   cached: number;
   missing: string[];
@@ -29,6 +33,7 @@ export type MediaUploadOptions = {
   config: MigrationConfig;
   mapPath: string;
   only?: string;
+  scope?: "fields" | "body" | "all";
   limit?: number;
   dryRun?: boolean;
   serviceDomain?: string;
@@ -95,11 +100,41 @@ function imageUrls(document: LegacyDocument, config: MigrationConfig): string[] 
   return urls;
 }
 
-/** CMS-editable image fields only. HTML body and generic document assets deliberately stay out. */
-export function collectCmsImageUrls(documents: readonly LegacyDocument[], config: MigrationConfig, only?: string): string[] {
+const UPLOAD_IMAGE_PATH = /^\/wp-content\/uploads\/.*\.(?:avif|gif|jpe?g|png|webp)$/i;
+
+function isUploadImageUrl(value: string): boolean {
+  try {
+    return UPLOAD_IMAGE_PATH.test(new URL(value.replaceAll("&amp;", "&"), "https://legacy.example.com").pathname);
+  } catch {
+    return false;
+  }
+}
+
+function bodyImageUrls(html: string): string[] {
+  const urls: string[] = [];
+  html.replace(/\b(src|srcset)=(['"])([^'"]+)\2/gi, (_whole, attribute: string, _quote: string, value: string) => {
+    const candidates = attribute.toLowerCase() === "srcset"
+      ? value.split(",").map((candidate) => candidate.trim().split(/\s+/, 1)[0] ?? "")
+      : [value];
+    for (const candidate of candidates) if (isUploadImageUrl(candidate)) urls.push(candidate);
+    return _whole;
+  });
+  return urls;
+}
+
+/** CMS image fields and legacy HTML uploads only; generic document assets deliberately stay out. */
+export function collectCmsImageUrls(documents: readonly LegacyDocument[], config: MigrationConfig, only?: string, scope: "fields" | "body" | "all" = "all"): { fields: string[]; body: string[]; urls: string[] } {
+  const fields = new Set<string>();
+  const body = new Set<string>();
+  for (const document of documents) {
+    if (only && document.api !== only) continue;
+    if (scope === "fields" || scope === "all") for (const url of imageUrls(document, config)) fields.add(url);
+    if ((scope === "body" || scope === "all") && typeof document.content?.legacyBodyHtml === "string") for (const url of bodyImageUrls(document.content.legacyBodyHtml)) body.add(url);
+  }
   const urls = new Set<string>();
-  for (const document of documents) if (!only || document.api === only) for (const url of imageUrls(document, config)) urls.add(url);
-  return [...urls].sort();
+  for (const url of fields) urls.add(url);
+  for (const url of body) urls.add(url);
+  return { fields: [...fields].sort(), body: [...body].sort(), urls: [...urls].sort() };
 }
 
 async function preparedUpload(body: Buffer): Promise<{ body: Buffer; type: string; filenameExtension: string; converted: boolean }> {
@@ -142,9 +177,10 @@ class RateLimiter {
 /** Uploads cache-backed CMS image references; it never fetches the legacy origin. */
 export async function uploadMedia(options: MediaUploadOptions): Promise<MediaUploadResult> {
   const documents = await readDocuments(options.irDir);
-  const urls = collectCmsImageUrls(documents, options.config, options.only).slice(0, options.limit);
+  const collected = collectCmsImageUrls(documents, options.config, options.only, options.scope);
+  const urls = collected.urls.slice(0, options.limit);
   const map = await readMap(options.mapPath);
-  const result: MediaUploadResult = { referenced: urls.length, cached: 0, missing: [], oversized: 0, sourceBytes: 0, uploaded: 0, skipped: 0, failures: [], dryRun: Boolean(options.dryRun) };
+  const result: MediaUploadResult = { fields: collected.fields.length, body: collected.body.length, referenced: urls.length, cached: 0, missing: [], oversized: 0, sourceBytes: 0, uploaded: 0, skipped: 0, failures: [], dryRun: Boolean(options.dryRun) };
   const cached: Array<{ url: string; body: Buffer }> = [];
   for (const url of urls) {
     if (map[url]) { result.skipped += 1; continue; }

@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
@@ -10,6 +10,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { collectMediaUrls, pullMedia, type MediaManifestEntry } from "../src/media/pull.js";
 import { pushMedia } from "../src/media/push.js";
 import { collectReferencedMediaUrls, transformMedia } from "../src/media/transform.js";
+import { transformStaticMedia } from "../src/media/transform-static.js";
 import { collectCmsImageUrls, uploadMedia } from "../src/media/upload.js";
 import type { MigrationConfig } from "../src/config.js";
 
@@ -169,6 +170,41 @@ describe("wpkit media transform", () => {
   });
 });
 
+describe("wpkit media transform-static", () => {
+  it("converts local theme images, merges the manifest, rewrites relative CSS URLs, and is idempotent", async () => {
+    const root = await tempDir();
+    const publicDir = join(root, "public");
+    const cssDir = join(publicDir, "wp-content/themes/theme/css");
+    const imageDir = join(publicDir, "wp-content/themes/theme/img");
+    const manifestPath = join(root, "src/data/media-manifest.json");
+    await Promise.all([mkdir(cssDir, { recursive: true }), mkdir(imageDir, { recursive: true }), mkdir(join(root, "src/data"), { recursive: true })]);
+    await writeFile(join(imageDir, "logo.png"), await sharp({ create: { width: 20, height: 10, channels: 4, background: "#336699" } }).png().toBuffer());
+    await writeFile(join(imageDir, "spinner.gif"), await sharp({ create: { width: 4, height: 3, channels: 3, background: "#ff0000" } }).gif().toBuffer());
+    await writeFile(join(imageDir, "icon.svg"), '<svg xmlns="http://www.w3.org/2000/svg" width="8" height="6" viewBox="0 0 8 6"><path d="M0 0h8v6H0z"/></svg>');
+    await writeFile(join(cssDir, "theme.css"), '.logo{background:url("../img/logo.png?v=1")}.spinner{background:url(../img/spinner.gif)}.icon{background:url(../img/icon.svg)}');
+    await writeFile(manifestPath, JSON.stringify({ "/wp-content/uploads/kept.jpg": { local: "/media/kept.webp", width: 1, height: 1, bytes: 1 } }));
+
+    const dry = await transformStaticMedia({ dir: publicDir, include: "wp-content/**", manifestPath, dryRun: true });
+    expect(dry).toMatchObject({ converted: 1, copied: 2, cssRewritten: 3 });
+    await expect(stat(join(imageDir, "logo.png"))).resolves.toBeDefined();
+
+    const first = await transformStaticMedia({ dir: publicDir, include: "wp-content/**", manifestPath });
+    expect(first).toMatchObject({ converted: 1, copied: 2, cssRewritten: 3 });
+    const manifest = JSON.parse(await readFile(manifestPath, "utf8")) as Record<string, { local: string }>;
+    expect(manifest["/wp-content/uploads/kept.jpg"]?.local).toBe("/media/kept.webp");
+    expect(manifest["/wp-content/themes/theme/img/logo.png"]?.local).toMatch(/^\/wp-content\/themes\/theme\/img\/logo\.png\.[a-f0-9]{8}\.webp$/);
+    expect(manifest["/wp-content/themes/theme/img/spinner.gif"]?.local).toMatch(/^\/wp-content\/themes\/theme\/img\/spinner\.gif\.[a-f0-9]{8}\.gif$/);
+    expect(manifest["/wp-content/themes/theme/img/icon.svg"]?.local).toMatch(/^\/wp-content\/themes\/theme\/img\/icon\.svg\.[a-f0-9]{8}\.svg$/);
+    await expect(stat(join(imageDir, "logo.png"))).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(stat(join(imageDir, "icon.svg"))).rejects.toMatchObject({ code: "ENOENT" });
+    expect(await readFile(join(cssDir, "theme.css"), "utf8")).toContain(`url("${manifest["/wp-content/themes/theme/img/logo.png"]?.local}")`);
+    expect(await sharp(join(publicDir, manifest["/wp-content/themes/theme/img/logo.png"]!.local)).metadata()).toMatchObject({ format: "webp", width: 20, height: 10 });
+
+    const second = await transformStaticMedia({ dir: publicDir, include: "wp-content/**", manifestPath });
+    expect(second).toMatchObject({ converted: 0, copied: 0, skipped: 0, cssRewritten: 0 });
+  });
+});
+
 describe("wpkit media push", () => {
   it("skips identical remote objects and reports only changes during dry-run", async () => {
     const mediaDir = await tempDir();
@@ -220,8 +256,8 @@ describe("wpkit media upload", () => {
     await writeFile(mapPath, JSON.stringify({ [card]: { assetUrl: "https://images.microcms-assets.io/assets/existing", uploadedAt: "2026-01-01T00:00:00.000Z" } }));
     const calls: Array<{ url: string; init?: RequestInit }> = []; const sleeps: number[] = [];
     const result = await uploadMedia({ irDir, cacheDir, config: mediaConfig, mapPath, serviceDomain: "service", apiKey: "key", now: () => new Date("2026-07-15T00:00:00.000Z"), sleep: async (ms) => { sleeps.push(ms); }, fetchImpl: async (url, init) => { calls.push({ url: String(url), init }); return new Response(JSON.stringify({ url: `https://images.microcms-assets.io/assets/${calls.length}` }), { headers: { "content-type": "application/json" } }); } });
-    expect(collectCmsImageUrls([uploadDocument({ featured, card, gallery: [gallery] }) as never], mediaConfig)).toEqual([featured, card, gallery]);
-    expect(result).toMatchObject({ referenced: 3, cached: 2, skipped: 1, uploaded: 2, missing: [], failures: [] });
+    expect(collectCmsImageUrls([uploadDocument({ featured, card, gallery: [gallery] }) as never], mediaConfig)).toEqual({ fields: [featured, card, gallery], body: [featured], urls: [featured, card, gallery] });
+    expect(result).toMatchObject({ fields: 3, body: 1, referenced: 3, cached: 2, skipped: 1, uploaded: 2, missing: [], failures: [] });
     expect(calls.map((call) => call.url)).toEqual(["https://service.microcms-management.io/api/v1/media", "https://service.microcms-management.io/api/v1/media"]);
     expect(calls[0]?.init?.headers).toEqual({ "X-MICROCMS-API-KEY": "key" });
     expect(calls[0]?.init?.body).toBeInstanceOf(FormData);
@@ -237,8 +273,24 @@ describe("wpkit media upload", () => {
     const hit = "https://old.test/wp-content/uploads/hit.jpg"; const missing = "https://old.test/wp-content/uploads/missing.jpg";
     await writeFile(join(irDir, "documents.ndjson"), `${JSON.stringify(uploadDocument({ featured: hit, card: missing }))}\n`); await cacheImage(cacheDir, hit, Buffer.from("hit"));
     const result = await uploadMedia({ irDir, cacheDir, config: mediaConfig, mapPath, dryRun: true });
-    expect(result).toMatchObject({ referenced: 2, cached: 1, sourceBytes: 3, missing: [missing], uploaded: 0, dryRun: true });
+    expect(result).toMatchObject({ fields: 2, body: 1, referenced: 2, cached: 1, sourceBytes: 3, missing: [missing], uploaded: 0, dryRun: true });
     await expect(readFile(mapPath, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it("collects upload images from body src and srcset, deduplicates fields, and honors scope", async () => {
+    const root = await tempDir(); const irDir = join(root, "ir"); const cacheDir = join(root, "cache"); const mapPath = join(root, "map.json");
+    await (await import("node:fs/promises")).mkdir(irDir, { recursive: true }); await (await import("node:fs/promises")).mkdir(cacheDir, { recursive: true });
+    const featured = "https://old.test/wp-content/uploads/featured.jpg";
+    const body = "https://old.test/wp-content/uploads/body.jpg";
+    const derived = "https://old.test/wp-content/uploads/body-300x200.jpg";
+    const document = uploadDocument({ featured });
+    (document.content as { legacyBodyHtml: string }).legacyBodyHtml = `<img src="${featured}" srcset="${body} 1x, ${derived} 2x"><img src="https://old.test/not-upload.jpg">`;
+    await writeFile(join(irDir, "documents.ndjson"), `${JSON.stringify(document)}\n`);
+    await Promise.all([cacheImage(cacheDir, featured, Buffer.from("featured")), cacheImage(cacheDir, body, Buffer.from("body")), cacheImage(cacheDir, derived, Buffer.from("derived"))]);
+    expect(collectCmsImageUrls([document as never], mediaConfig)).toEqual({ fields: [featured], body: [derived, body, featured], urls: [derived, body, featured] });
+    expect(await uploadMedia({ irDir, cacheDir, config: mediaConfig, mapPath, scope: "fields", dryRun: true })).toMatchObject({ fields: 1, body: 0, referenced: 1, cached: 1 });
+    expect(await uploadMedia({ irDir, cacheDir, config: mediaConfig, mapPath, scope: "body", dryRun: true })).toMatchObject({ fields: 0, body: 3, referenced: 3, cached: 3 });
+    expect(await uploadMedia({ irDir, cacheDir, config: mediaConfig, mapPath, dryRun: true })).toMatchObject({ fields: 1, body: 3, referenced: 3, cached: 3 });
   });
 
   it("converts cache files over 5MB to WebP before multipart upload", async () => {

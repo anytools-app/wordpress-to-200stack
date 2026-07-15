@@ -124,12 +124,38 @@ function replaceMappedImages(document: LegacyDocument, payload: Record<string, u
   return mapped;
 }
 
+function rewriteBodyMedia(document: LegacyDocument, value: unknown, mediaMap: MediaMap, warnings: ImportWarning[]): unknown {
+  if (typeof value !== "string") return value;
+  const rewriteUrl = (url: string): string => {
+    let isUpload = false;
+    try { isUpload = /^\/wp-content\/uploads\/.*\.(?:avif|gif|jpe?g|png|webp)$/i.test(new URL(url.replaceAll("&amp;", "&"), process.env.WPKIT_ORIGIN ?? "https://example.invalid").pathname); }
+    catch { return url; }
+    if (!isUpload) return url;
+    const mapped = mediaMap[url]?.assetUrl;
+    if (mapped) return mapped;
+    warnings.push({ api: document.api, contentId: document.contentId, fieldId: "legacyBodyHtml", value: url, reason: "missingMediaMap" });
+    return url;
+  };
+  return value.replace(/\b(src|srcset)=(['"])([^'"]+)\2/gi, (_whole, attribute: string, quote: string, attributeValue: string) => {
+    const rewritten = attribute.toLowerCase() === "srcset"
+      ? attributeValue.split(",").map((candidate) => {
+        const match = candidate.match(/^(\s*)(\S+)([\s\S]*)$/);
+        return match ? `${match[1] ?? ""}${rewriteUrl(match[2] ?? "")}${match[3] ?? ""}` : candidate;
+      }).join(",")
+      : rewriteUrl(attributeValue);
+    return `${attribute}=${quote}${rewritten}${quote}`;
+  });
+}
+
 function normalizePayload(document: LegacyDocument, payload: Record<string, unknown>, config: MigrationConfig | undefined, warnings: ImportWarning[], mediaMap?: MediaMap): Record<string, unknown> {
   const definition = config?.apis[document.api];
+  const bodyMappedPayload = mediaMap && "legacyBodyHtml" in payload
+    ? { ...payload, legacyBodyHtml: rewriteBodyMedia(document, payload.legacyBodyHtml, mediaMap, warnings) }
+    : payload;
   // --config is opt-in so existing import behavior remains unchanged.
-  if (!definition) return payload;
+  if (!definition) return bodyMappedPayload;
   const fields = fieldsForApi(definition);
-  const imageMappedPayload = mediaMap ? replaceMappedImages(document, payload, definition, mediaMap, warnings) : payload;
+  const imageMappedPayload = mediaMap ? replaceMappedImages(document, bodyMappedPayload, definition, mediaMap, warnings) : bodyMappedPayload;
   const normalized: Record<string, unknown> = {};
   for (const [fieldId, value] of Object.entries(imageMappedPayload)) {
     const field = fields.get(fieldId);

@@ -77,8 +77,9 @@ npm run wpkit -- parse --config ../mapping.config.ts -o ../_scratch/ir
 ### 4. media(ゲート2: missing を人が確認)
 
 **画像の配信方針(全案件共通)**: 外部ストレージ(R2 等)は使わない。画像は次の二本立てにする。
+uploads(記事に紐づく画像)は本文 HTML 内の参照も含めて microCMS 側、サイト同梱はテーマ資産だけが原則。
 
-1. **サイト同梱 + 200stack 配信**(本文 HTML 内の画像・テーマ装飾画像):
+1. **サイト同梱 + 200stack 配信**(テーマ装飾画像。uploads は移行完了までの dev つなぎのみ):
    ビルド時に `wpkit media transform` で webp 化(既定 q75・max-width 1600・アップスケールなし、
    gif は素通し)して `public/media/` に同梱する。**必要十分なサイズ・軽量フォーマットで置く**のが原則
    (実測で jpg/png → webp は総量 56% 減)。ファイル名には変換後バイト列の sha256 先頭8桁が入り
@@ -86,9 +87,13 @@ npm run wpkit -- parse --config ../mapping.config.ts -o ../_scratch/ir
    再生成時の孤児ファイルは `--prune` 指定時のみ削除。
    **バンドラ import 化(`src/assets` + 生成 manifest モジュール)はしない** — 数千枚規模の実測で
    Turbopack ビルドが 27s→795s(29倍)になり、CMS webhook 再ビルド運用と両立しない
-2. **microCMS 添付 + 画像 API 配信**(CMS で編集し続ける画像フィールド: アイキャッチ・ギャラリー等):
-   メディアアップロード API(**Team プラン以上・1ファイル5MB**)で移行し、配信 URL に
-   `?fm=webp&q=75`(+表示幅×2 の `w`)を必ず付ける。`auto=format` は非対応なので明示指定
+2. **microCMS 添付 + 画像 API 配信**(`/wp-content/uploads/` の記事画像すべて: 画像フィールドも
+   本文 HTML 内参照も)。`wpkit media upload`(`--scope fields|body|all`)でメディアアップロード API
+   (**Team プラン以上・1ファイル5MB**、超過分は upload が自動縮小)へ冪等アップロードし、
+   `import --media-map` が画像フィールド値と本文 `src/srcset` を asset URL へ差し替える。
+   配信 URL に `?fm=webp&q=75`(+表示幅×2 の `w`)を必ず付ける(`auto=format` 非対応なので明示指定。
+   本文分はテンプレの `rewriteBodyMedia()` が付与)。テーマ資産のハッシュ化は `media transform-static`
+   (CSS 内 url() の書き換え込み)
 
 ```bash
 npm run wpkit -- media transform --ir ../_scratch/ir --cache ../_scratch/remote-cache \
