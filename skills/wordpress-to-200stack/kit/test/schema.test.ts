@@ -19,9 +19,9 @@ describe("wpkit schema gen", () => {
     const cars = schemas.cars!;
     expect(Object.keys(cars)).toEqual(["apiFields", "customFields"]);
     expect(cars.apiFields.find((field) => field.fieldId === "title")).toMatchObject({ kind: "text", required: true, textSizeLimitValidation: null });
-    expect(cars.apiFields.find((field) => field.fieldId === "featuredImage")).toMatchObject({ kind: "image" });
+    expect(cars.apiFields.find((field) => field.fieldId === "featuredImage")).toMatchObject({ kind: "media" });
     expect(cars.apiFields.find((field) => field.fieldId === "gallery")).toMatchObject({ kind: "repeater", customFieldIds: ["gallery"], repeaterCountLimitValidation: null });
-    expect(cars.customFields).toEqual([expect.objectContaining({ fieldId: "gallery", fieldOrderByColumn: [["image", "caption"]], fields: [expect.objectContaining({ kind: "image" }), expect.objectContaining({ kind: "textArea" })] })]);
+    expect(cars.customFields).toEqual([expect.objectContaining({ fieldId: "gallery", fieldOrderByColumn: [["image", "caption"]], fields: [expect.objectContaining({ kind: "media" }), expect.objectContaining({ kind: "textArea" })] })]);
     expect(cars.apiFields.find((field) => field.fieldId === "related")).toMatchObject({ kind: "relation", referencedApiEndpoint: "pages", listViewFieldId: "DEFAULT" });
   });
 

@@ -174,6 +174,52 @@ describe("wpkit parse", () => {
     expect(car?.payloadChecksum).toBe(second.documents.find((document) => document.source.wpId === 10)?.payloadChecksum);
   });
 
+  it("keeps emitted IR byte-for-byte identical when contentIdStrategy is omitted or wpId", async () => {
+    const implicit = await parse();
+    const explicit = await parse(undefined, defineMigration({ ...mapping, contentIdStrategy: "wpId" }));
+    const implicitDir = await mkdtemp(join(tmpdir(), "wpkit-parse-"));
+    const explicitDir = await mkdtemp(join(tmpdir(), "wpkit-parse-"));
+    try {
+      await Promise.all([writeParseResult(implicit, implicitDir), writeParseResult(explicit, explicitDir)]);
+      for (const file of ["documents.ndjson", "routes.json", "attachments.ndjson", "relations.json", "inline-styles.json", "excluded.ndjson", "validation-report.json", "validation-report.md"]) {
+        expect(await readFile(join(implicitDir, file), "utf8")).toBe(await readFile(join(explicitDir, file), "utf8"));
+      }
+      expect(implicit.contentIds).toEqual({ strategy: "wpId", legacySlug: { adopted: 0, fallback: 0 } });
+    } finally {
+      await Promise.all([rm(implicitDir, { recursive: true, force: true }), rm(explicitDir, { recursive: true, force: true })]);
+    }
+  });
+
+  it("uses valid legacy path tails as content IDs and resolves relations through them", async () => {
+    const legacySlug = defineMigration({ ...mapping, contentIdStrategy: "legacySlug" });
+    const result = await parse(undefined, legacySlug);
+    const car = result.documents.find((document) => document.source.wpId === 10);
+    const page = result.documents.find((document) => document.source.wpId === 20);
+
+    expect(car?.contentId).toBe("cars-10");
+    expect(page?.contentId).toBe("about");
+    expect(result.routes.find((route) => route.wpId === 20)?.contentId).toBe("about");
+    expect(car?.relations).toContainEqual({ fieldId: "related", toApi: "pages", targetWpId: 20, targetContentId: "about" });
+    expect(result.contentIds).toEqual({ strategy: "legacySlug", legacySlug: { adopted: 1, fallback: 1 } });
+  });
+
+  it("falls back for overlong legacy slugs and duplicate slugs in the same API", async () => {
+    const legacySlug = defineMigration({ ...mapping, contentIdStrategy: "legacySlug" });
+    const longSlug = "a".repeat(65);
+    const overlong = await parse((xml) => xml.replace("<title>About</title><link>https://example.test/about/</link>", `<title>About</title><link>https://example.test/${longSlug}/</link>`), legacySlug);
+    expect(overlong.documents.find((document) => document.source.wpId === 20)?.contentId).toBe("pages-20");
+    expect(overlong.contentIds).toEqual({ strategy: "legacySlug", legacySlug: { adopted: 0, fallback: 2 } });
+
+    const collision = await parse((xml) => xml
+      .replace("<title>Second car</title><link>https://example.test/cars/second</link>", "<title>Duplicate About</title><link>https://example.test/about/</link>")
+      .replace("<wp:status>draft</wp:status>", "<wp:status>publish</wp:status>")
+      .replace("<wp:post_type>car</wp:post_type>\n    </item>\n    <item>\n      <title>About</title>", "<wp:post_type>page</wp:post_type>\n    </item>\n    <item>\n      <title>About</title>"), legacySlug);
+    expect(collision.documents.find((document) => document.source.wpId === 11)?.contentId).toBe("about");
+    expect(collision.documents.find((document) => document.source.wpId === 20)?.contentId).toBe("pages-20");
+    expect(collision.validation.warnings).toContainEqual(expect.objectContaining({ code: "contentIdSlugCollision", wpId: 20, api: "pages", details: { slug: "about", previousWpId: 11, fallbackContentId: "pages-20" } }));
+    expect(collision.contentIds).toEqual({ strategy: "legacySlug", legacySlug: { adopted: 1, fallback: 2 } });
+  });
+
   it("marks relations to excluded WXR items separately", async () => {
     const result = await parse((xml) => xml.replace('<wp:meta_key>related</wp:meta_key><wp:meta_value>999</wp:meta_value>', '<wp:meta_key>related</wp:meta_key><wp:meta_value>11</wp:meta_value>'));
     expect(result.relations.unresolved).toContainEqual(expect.objectContaining({ targetWpId: 11, reason: "targetExcluded" }));

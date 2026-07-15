@@ -37,6 +37,7 @@ export type AttachmentEntry = { wpId: number; url: string; path: string; mime?: 
 export type ParseResult = {
   documents: LegacyDocument[];
   routes: RouteEntry[];
+  contentIds: { strategy: "wpId" | "legacySlug"; legacySlug: { adopted: number; fallback: number } };
   attachments: AttachmentEntry[];
   relations: { resolved: LegacyDocument["relations"]; unresolved: Array<LegacyDocument["relations"][number] & { reason: "targetExcluded" | "targetMissing" }> };
   excluded: Array<{ wpId: number; postType: string; status: string; reason: string }>;
@@ -120,6 +121,46 @@ function routeFor(item: WxrItem): LegacyDocument["route"] {
   const trailingSlash = decoded.length > 1 && decoded.endsWith("/");
   const segments = decoded.split("/").filter(Boolean);
   return { legacyUrl: item.link, path: segments.length === 0 ? "/" : `/${segments.join("/")}`, segments, trailingSlash };
+}
+
+type ContentIdCandidate = { item: WxrItem; api: string; route: LegacyDocument["route"] };
+type ContentIdSummary = ParseResult["contentIds"];
+
+/** Determine every content ID before emitting routes or documents so all consumers share one source of truth. */
+function deriveContentIds(candidates: readonly ContentIdCandidate[], strategy: ContentIdSummary["strategy"], warnings: ValidationIssue[]): { bySource: Map<string, string>; summary: ContentIdSummary } {
+  const bySource = new Map<string, string>();
+  const claimedSlugs = new Map<string, Map<string, number>>();
+  let adopted = 0;
+  let fallback = 0;
+
+  for (const { item, api, route } of candidates) {
+    const fallbackId = `${api}-${item.wpId}`;
+    let contentId = fallbackId;
+    if (strategy === "legacySlug") {
+      const slug = route.segments.at(-1);
+      if (slug && /^[A-Za-z0-9_-]+$/.test(slug) && slug.length <= 64) {
+        const apiSlugs = claimedSlugs.get(api) ?? new Map<string, number>();
+        const previousWpId = apiSlugs.get(slug);
+        if (previousWpId === undefined) {
+          apiSlugs.set(slug, item.wpId);
+          claimedSlugs.set(api, apiSlugs);
+          contentId = slug;
+          adopted += 1;
+        } else {
+          fallback += 1;
+          warnings.push({
+            code: "contentIdSlugCollision",
+            wpId: item.wpId,
+            api,
+            message: `legacySlug "${slug}" が wpId=${previousWpId} と衝突したため contentId を "${fallbackId}" にフォールバックしました`,
+            details: { slug, previousWpId, fallbackContentId: fallbackId },
+          });
+        }
+      } else fallback += 1;
+    }
+    bySource.set(`${api}:${item.wpId}`, contentId);
+  }
+  return { bySource, summary: { strategy, legacySlug: { adopted, fallback } } };
 }
 
 function stable(value: unknown): unknown {
@@ -281,7 +322,10 @@ export function parseMigration(config: MigrationConfig, xml: string): ParseResul
     if (!mapped) { excluded.push({ wpId: item.wpId, postType: item.postType, status: item.status, reason: "unmapped post_type" }); continue; }
     candidates.push({ item, ...mapped });
   }
-  const routes = candidates.map(({ item, api }) => ({ ...routeFor(item), api, contentId: `${api}-${item.wpId}`, wpId: item.wpId, legacyUrl: item.link }));
+  const contentIdStrategy = config.contentIdStrategy ?? "wpId";
+  const contentIdCandidates = candidates.map(({ item, api }) => ({ item, api, route: routeFor(item) }));
+  const { bySource: contentIds, summary: contentIdSummary } = deriveContentIds(contentIdCandidates, contentIdStrategy, warnings);
+  const routes = contentIdCandidates.map(({ item, api, route }) => ({ ...route, api, contentId: contentIds.get(`${api}:${item.wpId}`)!, wpId: item.wpId, legacyUrl: item.link }));
   const routesByPath = new Map<string, RouteEntry>();
   for (const route of routes) {
     const previous = routesByPath.get(route.path);
@@ -343,7 +387,7 @@ export function parseMigration(config: MigrationConfig, xml: string): ParseResul
     for (const value of [seo?.title, seo?.description]) if (value && /%%[^%]+%%/.test(value)) warnings.push({ code: "yoastTemplateVariable", wpId: item.wpId, api, message: `Yoast テンプレート変数を未解決のまま保持しました: ${value}` });
     const document: Omit<LegacyDocument, "payloadChecksum"> = {
       source: { wpId: item.wpId, postType: item.postType, status: item.status, ...(item.postModifiedGmt ? { modifiedGmt: item.postModifiedGmt } : {}) },
-      api, ...(Array.isArray(definition.from) ? { kind: item.postType } : {}), contentId: `${api}-${item.wpId}`, route,
+      api, ...(Array.isArray(definition.from) ? { kind: item.postType } : {}), contentId: contentIds.get(`${api}:${item.wpId}`)!, route,
       content: { title: item.title, legacyBodyHtml: htmlResult.html, excerpt: item.excerpt, publishedAt: item.postDateGmt },
       ...(seo && Object.keys(seo).length > 0 ? { seo } : {}),
       taxonomies: item.taxonomies.filter((taxonomy) => definition.taxonomies?.includes(taxonomy.taxonomy) ?? false), fields, repeaters, relations,
@@ -351,7 +395,6 @@ export function parseMigration(config: MigrationConfig, xml: string): ParseResul
     };
     return { ...document, payloadChecksum: checksum(document) };
   });
-  const contentIds = new Map(documents.map((document) => [`${document.api}:${document.source.wpId}`, document.contentId]));
   const resolved: LegacyDocument["relations"] = [];
   const unresolved: ParseResult["relations"]["unresolved"] = [];
   for (const document of documents) for (const relation of document.relations) {
@@ -384,7 +427,7 @@ export function parseMigration(config: MigrationConfig, xml: string): ParseResul
       count: elements,
     });
   }
-  return { documents, routes, attachments, relations: { resolved, unresolved }, excluded, inlineStyles, validation: { errors, warnings: aggregateInternalLinkWarnings(warnings) } };
+  return { documents, routes, contentIds: contentIdSummary, attachments, relations: { resolved, unresolved }, excluded, inlineStyles, validation: { errors, warnings: aggregateInternalLinkWarnings(warnings) } };
 }
 
 export async function writeParseResult(result: ParseResult, outDir: string): Promise<void> {

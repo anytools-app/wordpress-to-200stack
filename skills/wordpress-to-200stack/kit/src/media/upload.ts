@@ -217,8 +217,18 @@ export async function uploadMedia(options: MediaUploadOptions): Promise<MediaUpl
       const prepared = await preparedUpload(entry.body, entry.url);
       const form = new FormData();
       form.set("file", new Blob([new Uint8Array(prepared.body)], { type: prepared.type }), filenameFor(entry.url, prepared.filenameExtension));
-      await limiter.take();
-      const response = await fetchImpl(endpoint, { method: "POST", headers: { "X-MICROCMS-API-KEY": apiKey }, body: form });
+      // 429 は指数バックオフで最大5回リトライする(バックオフなしで残件全滅した実測より)。
+      let response: Response;
+      let attempt = 0;
+      while (true) {
+        await limiter.take();
+        response = await fetchImpl(endpoint, { method: "POST", headers: { "X-MICROCMS-API-KEY": apiKey }, body: form });
+        if (response.status !== 429 || attempt >= 5) break;
+        const retryAfter = Number(response.headers.get("retry-after"));
+        const backoff = Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter * 1000 : Math.min(60_000 * 2 ** attempt, 300_000);
+        attempt += 1;
+        await (options.sleep ?? ((ms: number) => new Promise((resolve) => setTimeout(resolve, ms))))(backoff);
+      }
       if (!response.ok) throw new Error(`HTTP ${response.status}: ${(await response.text().catch(() => "")).slice(0, 1000)}`);
       const payload = await response.json() as { url?: unknown };
       if (typeof payload.url !== "string" || !payload.url) throw new Error("レスポンスに配信 URL がありません");

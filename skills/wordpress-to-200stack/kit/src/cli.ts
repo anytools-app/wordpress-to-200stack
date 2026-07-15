@@ -68,6 +68,8 @@ program
     console.log(JSON.stringify({
       apis: byApi,
       routes: result.routes.length,
+      contentIdStrategy: result.contentIds.strategy,
+      legacySlugContentIds: result.contentIds.legacySlug,
       errors: result.validation.errors.length,
       warnings: result.validation.warnings.length,
       inlineStyles: { elements: result.inlineStyles.summary.elements, pages: result.inlineStyles.summary.pages },

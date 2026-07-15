@@ -19,6 +19,7 @@ export type ApiDef = {
 export type MigrationConfig = {
   wxr: string;
   site: { origin: string; mediaHost: string };
+  contentIdStrategy?: "wpId" | "legacySlug";
   exclude?: { postTypes?: string[]; statuses?: string[] };
   apis: Record<string, ApiDef>;
   seo?: { yoast?: boolean };
@@ -64,6 +65,7 @@ const ApiDefSchema = z.object({
 const MigrationConfigSchema = z.object({
   wxr: nonEmpty,
   site: z.object({ origin: z.string().url(), mediaHost: z.string().url() }).strict(),
+  contentIdStrategy: z.enum(["wpId", "legacySlug"]).optional(),
   exclude: z.object({ postTypes: z.array(nonEmpty).optional(), statuses: z.array(nonEmpty).optional() }).strict().optional(),
   apis: z.record(nonEmpty, ApiDefSchema).refine((apis) => Object.keys(apis).length > 0, "apis は1件以上必要です"),
   seo: z.object({ yoast: z.boolean().optional() }).strict().optional(),
