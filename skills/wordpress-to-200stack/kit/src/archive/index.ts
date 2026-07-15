@@ -213,6 +213,7 @@ async function takeScreenshots(pages: ArchivedPage[], archiveDir: string, timeou
             const browserPage = await context.newPage(); browserPages.push(browserPage);
             await browserPage.setViewportSize(viewport);
             await browserPage.goto(target, { waitUntil: "networkidle" });
+            await browserPage.evaluate(() => Promise.race([((globalThis as unknown) as { document: { fonts: { ready: Promise<unknown> } } }).document.fonts.ready.then(() => undefined), new Promise<void>((resolve) => setTimeout(resolve, 5_000))])).catch(() => undefined);
             await browserPage.screenshot({ path: join(directory, `${name}.png`), fullPage: true });
           } } finally { await Promise.all(browserPages.map((browserPage) => browserPage.close().catch(() => undefined))); }
         }, timeoutMs);
