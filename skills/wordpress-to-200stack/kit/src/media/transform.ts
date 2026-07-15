@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
-import { readFile, stat, writeFile, mkdir } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { readFile, readdir, stat, unlink, writeFile, mkdir } from "node:fs/promises";
+import { dirname, extname, join, relative, sep } from "node:path";
 
 import sharp from "sharp";
 
@@ -20,6 +20,7 @@ export type MediaTransformSummary = {
   converted: number;
   copied: number;
   skipped: number;
+  pruned: number;
   sourceBytes: number;
   outputBytes: number;
 };
@@ -33,22 +34,27 @@ export type MediaTransformOptions = {
   maxWidth?: number;
   quality?: number;
   dryRun?: boolean;
+  prune?: boolean;
 };
 export type MediaTransformResult = { manifest: MediaTransformManifest; entries: Record<string, LocalMediaEntry> };
 type TransformOutcome = { sourceUrl: string; missing?: true; pathname?: string; entry?: LocalMediaEntry; sourceBytes?: number; status?: "converted" | "copied" | "skipped" };
 
 const IMAGE_EXTENSION = /\.(?:jpe?g|png|gif|webp)$/i;
 const URL_CANDIDATE = /(?:https?:)?\/\/[^\s"'<>]+|\/wp-content\/uploads\/[^\s"'<>]+/gi;
-const DEFAULT_ORIGIN = process.env.WPKIT_ORIGIN ?? "https://example.invalid";
+function defaultOrigin(): string { return process.env.WPKIT_ORIGIN ?? "https://example.invalid"; }
+function originAliasHosts(): Set<string> { return new Set((process.env.WPKIT_ORIGIN_ALIASES ?? "").split(",").map((host) => host.trim()).filter(Boolean)); }
 
 function cacheKey(url: string): string { return createHash("sha1").update(url).digest("hex"); }
 
 function uploadUrl(raw: string): URL | undefined {
   const decoded = raw.replaceAll("&amp;", "&");
   try {
-    const url = new URL(decoded.startsWith("//") ? `https:${decoded}` : decoded, DEFAULT_ORIGIN);
+    const url = new URL(decoded.startsWith("//") ? `https:${decoded}` : decoded, defaultOrigin());
     // A fragment is not part of an HTTP request and therefore cannot be part of a remote-cache key.
     url.hash = "";
+    // Legacy documents may mix retired alias hosts with the canonical origin,
+    // while the fetch-once cache is keyed by the latter (WPKIT_ORIGIN_ALIASES, comma separated).
+    if (originAliasHosts().has(url.hostname)) url.hostname = new URL(defaultOrigin()).hostname;
     return url.pathname.startsWith("/wp-content/uploads/") && IMAGE_EXTENSION.test(url.pathname) ? url : undefined;
   } catch {
     return undefined;
@@ -106,20 +112,35 @@ async function readCached(url: string, cacheDir: string): Promise<Buffer | undef
   }
 }
 
-async function readPreviousManifest(path: string): Promise<Record<string, unknown>> {
-  try {
-    const parsed = JSON.parse(await readFile(path, "utf8")) as unknown;
-    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed as Record<string, unknown> : {};
-  } catch (error: unknown) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return {};
-    throw error;
-  }
+function manifestFormat(path: string): "json" | "ts" {
+  return extname(path).toLowerCase() === ".ts" ? "ts" : "json";
 }
 
-function isLocalEntry(value: unknown): value is LocalMediaEntry {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
-  const entry = value as Partial<LocalMediaEntry>;
-  return typeof entry.local === "string" && Number.isInteger(entry.width) && Number.isInteger(entry.height) && Number.isInteger(entry.bytes);
+function importPath(manifestPath: string, outputPath: string): string {
+  const path = relative(dirname(manifestPath), outputPath).split(sep).join("/");
+  return path.startsWith(".") ? path : `./${path}`;
+}
+
+function typeScriptManifest(manifestPath: string, entries: Record<string, LocalMediaEntry>, outDir: string): string {
+  const imports: string[] = [];
+  const records: string[] = [];
+  for (const [index, [pathname]] of Object.entries(entries).sort(([left], [right]) => left.localeCompare(right)).entries()) {
+    const outputPath = filePath(outDir, outputPathname(new URL(pathname, defaultOrigin()), extension(pathname)));
+    imports.push(`import m${index} from ${JSON.stringify(importPath(manifestPath, outputPath))};`);
+    records.push(`  ${JSON.stringify(pathname)}: m${index},`);
+  }
+  return [
+    "// 自動生成: wpkit media transform",
+    'import type { StaticImageData } from "next/image";',
+    ...imports,
+    "",
+    "const manifest: Record<string, StaticImageData> = {",
+    ...records,
+    "};",
+    "",
+    "export default manifest;",
+    "",
+  ].join("\n");
 }
 
 function extension(pathname: string): "jpg" | "png" | "gif" | "webp" {
@@ -133,17 +154,56 @@ function outputPathname(url: URL, kind: ReturnType<typeof extension>): string {
   return kind === "jpg" || kind === "png" ? `${url.pathname}.webp` : url.pathname;
 }
 
+/** JSON manifests are served from public/, so their output name carries the transformed content identity. */
+function hashedOutputPathname(url: URL, kind: ReturnType<typeof extension>, body: Buffer): string {
+  const hash = createHash("sha256").update(body).digest("hex").slice(0, 8);
+  return kind === "jpg" || kind === "png"
+    ? `${url.pathname}.${hash}.webp`
+    : `${url.pathname}.${hash}.${kind}`;
+}
+
 function filePath(root: string, pathname: string): string {
   return join(root, pathname.replace(/^\/+/, ""));
 }
 
-async function existingEntry(previous: Record<string, unknown>, pathname: string, local: string, outputPath: string): Promise<LocalMediaEntry | undefined> {
-  const entry = previous[pathname];
-  if (!isLocalEntry(entry) || entry.local !== local) return undefined;
+async function existingTypeScriptEntry(pathname: string, local: string, outputPath: string): Promise<LocalMediaEntry | undefined> {
   try {
-    return (await stat(outputPath)).size === entry.bytes ? entry : undefined;
+    const [file, metadata] = await Promise.all([stat(outputPath), sharp(outputPath, { animated: extension(pathname) === "gif" }).metadata()]);
+    return metadata.width && metadata.height ? { local, width: metadata.width, height: metadata.height, bytes: file.size } : undefined;
   } catch (error: unknown) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
+    throw error;
+  }
+}
+
+async function existingHashedEntry(local: string, outputPath: string, body: Buffer, width: number, height: number): Promise<LocalMediaEntry | undefined> {
+  try {
+    const existing = await readFile(outputPath);
+    const expectedHash = createHash("sha256").update(body).digest("hex");
+    if (existing.byteLength !== body.byteLength || createHash("sha256").update(existing).digest("hex") !== expectedHash) return undefined;
+    return { local, width, height, bytes: existing.byteLength };
+  } catch (error: unknown) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
+    throw error;
+  }
+}
+
+async function pruneUnreferencedFiles(outDir: string, referenced: Set<string>): Promise<number> {
+  try {
+    const files = async (directory: string, relativeDirectory = ""): Promise<string[]> => {
+      const entries = await readdir(directory, { withFileTypes: true });
+      const nested = await Promise.all(entries.map(async (entry) => {
+        const relativePath = join(relativeDirectory, entry.name);
+        if (entry.isFile()) return [relativePath];
+        return entry.isDirectory() ? files(join(directory, entry.name), relativePath) : [];
+      }));
+      return nested.flat();
+    };
+    const stale = (await files(outDir)).filter((path) => !referenced.has(path));
+    await Promise.all(stale.map((path) => unlink(join(outDir, path))));
+    return stale.length;
+  } catch (error: unknown) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return 0;
     throw error;
   }
 }
@@ -162,13 +222,14 @@ async function transformImage(body: Buffer, kind: ReturnType<typeof extension>, 
 
 /** Transform cached upload references only. This function intentionally has no network dependency. */
 export async function transformMedia(options: MediaTransformOptions): Promise<MediaTransformResult> {
-  const [documents, previous] = await Promise.all([readDocuments(options.irDir), readPreviousManifest(options.manifestPath)]);
+  const format = manifestFormat(options.manifestPath);
+  const documents = await readDocuments(options.irDir);
   const urls = collectReferencedMediaUrls(documents);
   const maxWidth = options.maxWidth ?? 1600;
   const quality = options.quality ?? 75;
   const entries: Record<string, LocalMediaEntry> = {};
   const missing: string[] = [];
-  const summary: MediaTransformSummary = { referenced: urls.length, cached: 0, missing: 0, converted: 0, copied: 0, skipped: 0, sourceBytes: 0, outputBytes: 0 };
+  const summary: MediaTransformSummary = { referenced: urls.length, cached: 0, missing: 0, converted: 0, copied: 0, skipped: 0, pruned: 0, sourceBytes: 0, outputBytes: 0 };
 
   const processUrl = async (sourceUrl: string): Promise<TransformOutcome> => {
     const url = new URL(sourceUrl);
@@ -176,14 +237,26 @@ export async function transformMedia(options: MediaTransformOptions): Promise<Me
     if (!body) return { sourceUrl, missing: true };
     const kind = extension(url.pathname);
     const pathname = url.pathname;
-    const local = `/media${outputPathname(url, kind)}`;
-    const outputPath = filePath(options.outDir, outputPathname(url, kind));
-    const prior = await existingEntry(previous, pathname, local, outputPath);
-    if (prior) {
-      return { sourceUrl, pathname, entry: prior, sourceBytes: body.byteLength, status: "skipped" };
+    if (format === "ts") {
+      const local = `/media${outputPathname(url, kind)}`;
+      const outputPath = filePath(options.outDir, outputPathname(url, kind));
+      const prior = await existingTypeScriptEntry(pathname, local, outputPath);
+      if (prior) return { sourceUrl, pathname, entry: prior, sourceBytes: body.byteLength, status: "skipped" };
+      const transformed = await transformImage(body, kind, maxWidth, quality);
+      const entry: LocalMediaEntry = { local, width: transformed.width, height: transformed.height, bytes: transformed.body.byteLength };
+      if (!options.dryRun) {
+        await mkdir(dirname(outputPath), { recursive: true });
+        await writeFile(outputPath, transformed.body);
+      }
+      return { sourceUrl, pathname, entry, sourceBytes: body.byteLength, status: transformed.converted ? "converted" : "copied" };
     }
 
     const transformed = await transformImage(body, kind, maxWidth, quality);
+    const hashedPathname = hashedOutputPathname(url, kind, transformed.body);
+    const local = `/media${hashedPathname}`;
+    const outputPath = filePath(options.outDir, hashedPathname);
+    const prior = await existingHashedEntry(local, outputPath, transformed.body, transformed.width, transformed.height);
+    if (prior) return { sourceUrl, pathname, entry: prior, sourceBytes: body.byteLength, status: "skipped" };
     const entry: LocalMediaEntry = { local, width: transformed.width, height: transformed.height, bytes: transformed.body.byteLength };
     if (!options.dryRun) {
       await mkdir(dirname(outputPath), { recursive: true });
@@ -209,10 +282,21 @@ export async function transformMedia(options: MediaTransformOptions): Promise<Me
 
   missing.sort();
   summary.missing = missing.length;
+  if (format === "json" && options.prune && !options.dryRun) {
+    const referenced = new Set(Object.values(entries).map((entry) => entry.local.replace(/^\/media\//, "")));
+    summary.pruned = await pruneUnreferencedFiles(options.outDir, referenced);
+  }
   const manifest: MediaTransformManifest = { ...entries, missing, summary };
   if (!options.dryRun) {
     await mkdir(dirname(options.manifestPath), { recursive: true });
-    await writeFile(options.manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+    if (format === "json") {
+      await writeFile(options.manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+    } else {
+      await Promise.all([
+        writeFile(options.manifestPath, typeScriptManifest(options.manifestPath, entries, options.outDir)),
+        writeFile(join(dirname(options.manifestPath), "media-missing.json"), `${JSON.stringify({ missing, summary }, null, 2)}\n`),
+      ]);
+    }
   }
   return { manifest, entries };
 }

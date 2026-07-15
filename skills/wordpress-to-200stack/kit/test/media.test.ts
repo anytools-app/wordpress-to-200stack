@@ -59,6 +59,19 @@ async function cacheImage(cacheDir: string, url: string, body: Buffer): Promise<
 }
 
 describe("wpkit media transform", () => {
+  it("normalizes WPKIT_ORIGIN_ALIASES hosts to the canonical origin before looking up the fetch-once cache", () => {
+    process.env.WPKIT_ORIGIN = "https://legacy.example.com";
+    process.env.WPKIT_ORIGIN_ALIASES = "media.legacy.example.com";
+    try {
+      expect(collectReferencedMediaUrls([{ featuredImage: "https://media.legacy.example.com/wp-content/uploads/2024/a.jpg" }])).toEqual([
+        "https://legacy.example.com/wp-content/uploads/2024/a.jpg",
+      ]);
+    } finally {
+      delete process.env.WPKIT_ORIGIN;
+      delete process.env.WPKIT_ORIGIN_ALIASES;
+    }
+  });
+
   it("collects document references only, transforms cache hits, and records cache misses without fetching", async () => {
     const root = await tempDir(); const irDir = join(root, "ir"); const cacheDir = join(root, "cache"); const outDir = join(root, "public", "media"); const manifestPath = join(root, "src", "data", "media-manifest.json");
     await (await import("node:fs/promises")).mkdir(irDir, { recursive: true });
@@ -85,13 +98,16 @@ describe("wpkit media transform", () => {
     expect(collectReferencedMediaUrls([{ featuredImage: jpg, fields: { image: png }, repeaters: { gallery: [{ image: gif }] }, content: { legacyBodyHtml: `<img src="${missing}">` } }])).toEqual([gif, png, jpg, missing]);
     const result = await transformMedia({ irDir, cacheDir, outDir, manifestPath, maxWidth: 10, quality: 70 });
 
-    expect(result.manifest.summary).toMatchObject({ referenced: 5, cached: 4, missing: 1, converted: 3, copied: 1 });
+    expect(result.manifest.summary).toMatchObject({ referenced: 5, cached: 4, missing: 1, converted: 3, copied: 1, pruned: 0 });
     expect(result.manifest.missing).toEqual([missing]);
-    expect(result.entries["/wp-content/uploads/2024/large.jpg"]).toMatchObject({ local: "/media/wp-content/uploads/2024/large.jpg.webp", width: 10, height: 5 });
-    expect(result.entries["/wp-content/uploads/2024/animated.gif"]).toMatchObject({ local: "/media/wp-content/uploads/2024/animated.gif", width: 1, height: 1, bytes: gifBody.byteLength });
-    expect(await sharp(await readFile(join(outDir, "wp-content/uploads/2024/large.jpg.webp"))).metadata()).toMatchObject({ format: "webp", width: 10, height: 5 });
-    expect(await readFile(join(outDir, "wp-content/uploads/2024/animated.gif"))).toEqual(gifBody);
-    expect(await sharp(await readFile(join(outDir, "wp-content/uploads/2024/already.webp"))).metadata()).toMatchObject({ format: "webp", width: 10, height: 5 });
+    const large = result.entries["/wp-content/uploads/2024/large.jpg"]!;
+    const animated = result.entries["/wp-content/uploads/2024/animated.gif"]!;
+    const already = result.entries["/wp-content/uploads/2024/already.webp"]!;
+    expect(large).toMatchObject({ local: expect.stringMatching(/^\/media\/wp-content\/uploads\/2024\/large\.jpg\.[a-f0-9]{8}\.webp$/), width: 10, height: 5 });
+    expect(animated).toMatchObject({ local: expect.stringMatching(/^\/media\/wp-content\/uploads\/2024\/animated\.gif\.[a-f0-9]{8}\.gif$/), width: 1, height: 1, bytes: gifBody.byteLength });
+    expect(await sharp(await readFile(join(outDir, large.local.replace(/^\/media\//, "")))).metadata()).toMatchObject({ format: "webp", width: 10, height: 5 });
+    expect(await readFile(join(outDir, animated.local.replace(/^\/media\//, "")))).toEqual(gifBody);
+    expect(await sharp(await readFile(join(outDir, already.local.replace(/^\/media\//, "")))).metadata()).toMatchObject({ format: "webp", width: 10, height: 5 });
     expect(JSON.parse(await readFile(manifestPath, "utf8"))).toMatchObject({ missing: [missing] });
 
     const rerun = await transformMedia({ irDir, cacheDir, outDir, manifestPath, maxWidth: 10, quality: 70 });
@@ -106,9 +122,50 @@ describe("wpkit media transform", () => {
     await writeFile(join(irDir, "documents.ndjson"), `${JSON.stringify({ featuredImage: url, fields: {}, repeaters: {}, content: { legacyBodyHtml: "" } })}\n`);
     await cacheImage(cacheDir, url, await sharp({ create: { width: 2, height: 2, channels: 3, background: "#ffffff" } }).jpeg().toBuffer());
     const result = await transformMedia({ irDir, cacheDir, outDir, manifestPath, dryRun: true });
-    expect(result.entries["/wp-content/uploads/2024/dry.jpg"]).toMatchObject({ local: "/media/wp-content/uploads/2024/dry.jpg.webp" });
+    expect(result.entries["/wp-content/uploads/2024/dry.jpg"]).toMatchObject({ local: expect.stringMatching(/^\/media\/wp-content\/uploads\/2024\/dry\.jpg\.[a-f0-9]{8}\.webp$/) });
     await expect(readFile(manifestPath, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
-    await expect(readFile(join(outDir, "wp-content/uploads/2024/dry.jpg.webp"))).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(readFile(join(outDir, result.entries["/wp-content/uploads/2024/dry.jpg"]!.local.replace(/^\/media\//, "")))).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it("prunes only unreferenced output files when explicitly requested", async () => {
+    const root = await tempDir(); const irDir = join(root, "ir"); const cacheDir = join(root, "cache"); const outDir = join(root, "public", "media"); const manifestPath = join(root, "src", "data", "media-manifest.json");
+    const url = "https://legacy.example.com/wp-content/uploads/2024/current.jpg";
+    await (await import("node:fs/promises")).mkdir(irDir, { recursive: true });
+    await (await import("node:fs/promises")).mkdir(cacheDir, { recursive: true });
+    await (await import("node:fs/promises")).mkdir(join(outDir, "wp-content/uploads/2024"), { recursive: true });
+    await writeFile(join(irDir, "documents.ndjson"), `${JSON.stringify({ featuredImage: url })}\n`);
+    await cacheImage(cacheDir, url, await sharp({ create: { width: 2, height: 2, channels: 3, background: "#ffffff" } }).jpeg().toBuffer());
+    await writeFile(join(outDir, "wp-content/uploads/2024/stale.jpg.webp"), "stale");
+
+    const result = await transformMedia({ irDir, cacheDir, outDir, manifestPath, prune: true });
+    expect(result.manifest.summary.pruned).toBe(1);
+    await expect(readFile(join(outDir, "wp-content/uploads/2024/stale.jpg.webp"))).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(readFile(join(outDir, result.entries["/wp-content/uploads/2024/current.jpg"]!.local.replace(/^\/media\//, "")))).resolves.toBeInstanceOf(Buffer);
+  });
+
+  it("writes a stable TypeScript StaticImageData manifest and puts missing details in JSON", async () => {
+    const root = await tempDir(); const irDir = join(root, "ir"); const cacheDir = join(root, "cache"); const outDir = join(root, "src", "assets", "media"); const manifestPath = join(root, "src", "data", "media-manifest.ts");
+    await (await import("node:fs/promises")).mkdir(irDir, { recursive: true });
+    await (await import("node:fs/promises")).mkdir(cacheDir, { recursive: true });
+    const zebra = "https://legacy.example.com/wp-content/uploads/2024/zebra.jpg";
+    const apple = "https://legacy.example.com/wp-content/uploads/2024/apple.png";
+    const missing = "https://legacy.example.com/wp-content/uploads/2024/missing.jpg";
+    await writeFile(join(irDir, "documents.ndjson"), `${JSON.stringify({ featuredImage: zebra, fields: { image: apple }, content: { legacyBodyHtml: `<img src="${missing}">` } })}\n`);
+    await Promise.all([
+      cacheImage(cacheDir, zebra, await sharp({ create: { width: 2, height: 2, channels: 3, background: "#ffffff" } }).jpeg().toBuffer()),
+      cacheImage(cacheDir, apple, await sharp({ create: { width: 2, height: 2, channels: 3, background: "#000000" } }).png().toBuffer()),
+    ]);
+
+    await transformMedia({ irDir, cacheDir, outDir, manifestPath });
+    const generated = await readFile(manifestPath, "utf8");
+    expect(generated).toContain('import type { StaticImageData } from "next/image";');
+    expect(generated).toContain('import m0 from "../assets/media/wp-content/uploads/2024/apple.png.webp";');
+    expect(generated).toContain('import m1 from "../assets/media/wp-content/uploads/2024/zebra.jpg.webp";');
+    expect(generated.indexOf('"/wp-content/uploads/2024/apple.png"')).toBeLessThan(generated.indexOf('"/wp-content/uploads/2024/zebra.jpg"'));
+    expect(JSON.parse(await readFile(join(root, "src", "data", "media-missing.json"), "utf8"))).toMatchObject({ missing: [missing], summary: { cached: 2, missing: 1 } });
+
+    const rerun = await transformMedia({ irDir, cacheDir, outDir, manifestPath });
+    expect(rerun.manifest.summary).toMatchObject({ skipped: 2, converted: 0, copied: 0 });
   });
 });
 

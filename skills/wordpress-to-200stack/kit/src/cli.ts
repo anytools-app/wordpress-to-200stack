@@ -94,14 +94,15 @@ media
   .command("transform")
   .requiredOption("--ir <irDir>", "parse output directory")
   .requiredOption("--cache <cacheDir>", "fetch-once remote-cache directory")
-  .requiredOption("--out <outDir>", "site public/media output directory")
-  .requiredOption("--manifest <manifestPath>", "site media-manifest.json output path")
+  .requiredOption("--out <outDir>", "site media asset output directory")
+  .requiredOption("--manifest <manifestPath>", "site media manifest output path (.ts selects a StaticImageData module)")
   .option("--max-width <width>", "maximum output width", positiveCount, 1600)
   .option("--quality <quality>", "WebP quality for JPEG/PNG", positiveNumber, 75)
   .option("--dry-run", "inspect cache-backed output without writing files")
-  .action(async (options: { ir: string; cache: string; out: string; manifest: string; maxWidth: number; quality: number; dryRun?: boolean }) => {
+  .option("--prune", "delete output files not referenced by the generated JSON manifest")
+  .action(async (options: { ir: string; cache: string; out: string; manifest: string; maxWidth: number; quality: number; dryRun?: boolean; prune?: boolean }) => {
     if (options.quality > 100) throw new Error(`quality は 100 以下を指定してください: ${options.quality}`);
-    const result = await transformMedia({ irDir: options.ir, cacheDir: options.cache, outDir: options.out, manifestPath: options.manifest, maxWidth: options.maxWidth, quality: options.quality, dryRun: options.dryRun });
+    const result = await transformMedia({ irDir: options.ir, cacheDir: options.cache, outDir: options.out, manifestPath: options.manifest, maxWidth: options.maxWidth, quality: options.quality, dryRun: options.dryRun, prune: options.prune });
     // dry-run は生成予定の manifest そのものを stdout に出し、司令塔が欠損 URL をそのまま扱えるようにする。
     console.log(JSON.stringify(options.dryRun ? result.manifest : { summary: result.manifest.summary, manifest: options.manifest }));
   });

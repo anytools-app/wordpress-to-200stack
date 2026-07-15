@@ -81,15 +81,22 @@ npm run wpkit -- parse --config ../mapping.config.ts -o ../_scratch/ir
 1. **サイト同梱 + 200stack 配信**(本文 HTML 内の画像・テーマ装飾画像):
    ビルド時に `wpkit media transform` で webp 化(既定 q75・max-width 1600・アップスケールなし、
    gif は素通し)して `public/media/` に同梱する。**必要十分なサイズ・軽量フォーマットで置く**のが原則
-   (実測で jpg/png → webp は総量 56% 減)
+   (実測で jpg/png → webp は総量 56% 減)。ファイル名には変換後バイト列の sha256 先頭8桁が入り
+   (`a.jpg.<hash8>.webp`)、パス固定のまま immutable キャッシュとキャッシュバストが成立する。
+   再生成時の孤児ファイルは `--prune` 指定時のみ削除。
+   **バンドラ import 化(`src/assets` + 生成 manifest モジュール)はしない** — 数千枚規模の実測で
+   Turbopack ビルドが 27s→795s(29倍)になり、CMS webhook 再ビルド運用と両立しない
 2. **microCMS 添付 + 画像 API 配信**(CMS で編集し続ける画像フィールド: アイキャッチ・ギャラリー等):
    メディアアップロード API(**Team プラン以上・1ファイル5MB**)で移行し、配信 URL に
    `?fm=webp&q=75`(+表示幅×2 の `w`)を必ず付ける。`auto=format` は非対応なので明示指定
 
 ```bash
 npm run wpkit -- media transform --ir ../_scratch/ir --cache ../_scratch/remote-cache \
-  --out ../site/public/media --manifest ../site/src/data/media-manifest.json --dry-run  # missing を確認 → 本実行
+  --out ../site/public/media --manifest ../site/src/data/media-manifest.json --dry-run  # missing を確認 → 本実行(再生成時は --prune)
 ```
+
+- 旧ドメインの別名ホスト(例: 引退した media サブドメイン)が本文に混在する場合は
+  `WPKIT_ORIGIN_ALIASES`(カンマ区切り)で正規ホスト(`WPKIT_ORIGIN`)に正規化してキャッシュを引く
 
 - transform は fetch-once の remote-cache だけを読む(キャッシュミスはネットワークに出ず manifest の
   `missing` に列挙 → 司令塔が回収してから再実行)。派生サイズ URL(`-WxH.ext`)は原本に解決せず
