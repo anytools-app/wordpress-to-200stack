@@ -70,6 +70,7 @@ program
       routes: result.routes.length,
       errors: result.validation.errors.length,
       warnings: result.validation.warnings.length,
+      inlineStyles: { elements: result.inlineStyles.summary.elements, pages: result.inlineStyles.summary.pages },
       outDir: options.outDir,
     }));
     if (result.validation.errors.length > 0) process.exitCode = 1;

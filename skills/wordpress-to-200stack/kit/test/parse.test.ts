@@ -1,11 +1,13 @@
-import { readFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { describe, expect, it } from "vitest";
 
 import mapping from "./fixtures/mini-mapping.config.js";
 import { defineMigration } from "../src/config.js";
-import { parseMigration } from "../src/parse/index.js";
+import { parseMigration, writeParseResult } from "../src/parse/index.js";
 
 const fixturePath = fileURLToPath(new URL("./fixtures/mini-wxr.xml", import.meta.url));
 
@@ -51,6 +53,65 @@ describe("wpkit parse", () => {
       "https://example.test/wp-content/uploads/a.jpg",
       "https://example.test/wp-content/uploads/a.pdf",
     ]);
+  });
+
+  it("reports inline style attributes by page and property without changing the HTML", async () => {
+    const result = await parse((xml) => xml
+      .replace("<table><tr><td>x</td></tr></table>", '<table style="font-size:32px; color:red"><tr><td style="COLOR: blue; font-size: 16px">x</td></tr></table>')
+      .replace("<![CDATA[<p>About</p>]]>", '<![CDATA[<p style="color: green">About</p>]]>'));
+
+    expect(result.inlineStyles.summary).toEqual({
+      elements: 3,
+      pages: 2,
+      properties: [
+        { property: "color", count: 3 },
+        { property: "font-size", count: 2 },
+      ],
+    });
+    expect(result.inlineStyles.pages).toEqual([
+      {
+        wpId: 10,
+        api: "cars",
+        path: "/cars/アクメ",
+        elements: 2,
+        properties: [
+          { property: "color", count: 2 },
+          { property: "font-size", count: 2 },
+        ],
+      },
+      {
+        wpId: 20,
+        api: "pages",
+        path: "/about",
+        elements: 1,
+        properties: [{ property: "color", count: 1 }],
+      },
+    ]);
+    expect(result.documents.find((document) => document.source.wpId === 10)?.content.legacyBodyHtml).toContain('style="font-size:32px; color:red"');
+    const warnings = result.validation.warnings.filter((entry) => entry.code === "inlineStyleAttributes");
+    expect(warnings).toEqual([expect.objectContaining({
+      count: 3,
+      details: { elements: 3, pages: 2, topProperties: result.inlineStyles.summary.properties },
+    })]);
+  });
+
+  it("has no inline style report or warning when the source has no style attributes", async () => {
+    const result = await parse();
+    expect(result.inlineStyles.summary.elements).toBe(0);
+    expect(result.inlineStyles.summary.pages).toBe(0);
+    expect(result.inlineStyles.pages).toEqual([]);
+    expect(result.validation.warnings.some((entry) => entry.code === "inlineStyleAttributes")).toBe(false);
+  });
+
+  it("writes the inline style report", async () => {
+    const result = await parse((xml) => xml.replace("<table><tr><td>x</td></tr></table>", '<table style="color:red"><tr><td>x</td></tr></table>'));
+    const outDir = await mkdtemp(join(tmpdir(), "wpkit-parse-"));
+    try {
+      await writeParseResult(result, outDir);
+      expect(JSON.parse(await readFile(join(outDir, "inline-styles.json"), "utf8"))).toEqual(result.inlineStyles);
+    } finally {
+      await rm(outDir, { recursive: true, force: true });
+    }
   });
 
   it("expands cached oEmbed HTML for naked URL paragraphs and warns when the cache is absent", async () => {

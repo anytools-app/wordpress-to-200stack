@@ -53,6 +53,8 @@ wp-static-kit/                     # 独立リポジトリ(npm workspace / TypeS
   - 本文 HTML は legacyBodyHtml として保持。画像 URL・内部リンクを台帳で書き換え、
     script 除去・埋め込み(YouTube/Vimeo/Instagram/GCal)はプレースホルダー化
   - relation(投稿間参照)は wp_id で解決し relations.json へ
+  - 本文の inline style は inline-styles.json に集計(要素数・出現ページ・プロパティ頻度)。
+    サイト側サニタイザが style 属性を除去するため、削除許容かデータ変換かを移行者が判断する材料
 - 出力に validation-report.json(URL 衝突・未解決参照・リピータ不一致・画像欠損)。**エラー0が次工程のゲート**
 
 ### wpkit media pull / push
