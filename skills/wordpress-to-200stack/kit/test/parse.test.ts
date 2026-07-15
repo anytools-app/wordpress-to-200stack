@@ -184,6 +184,7 @@ describe("wpkit parse", () => {
       for (const file of ["documents.ndjson", "routes.json", "attachments.ndjson", "relations.json", "inline-styles.json", "excluded.ndjson", "validation-report.json", "validation-report.md"]) {
         expect(await readFile(join(implicitDir, file), "utf8")).toBe(await readFile(join(explicitDir, file), "utf8"));
       }
+      expect(implicit.documents.some((document) => document.contentIdProvisional)).toBe(false);
       expect(implicit.contentIds).toEqual({ strategy: "wpId", legacySlug: { adopted: 0, fallback: 0 } });
     } finally {
       await Promise.all([rm(implicitDir, { recursive: true, force: true }), rm(explicitDir, { recursive: true, force: true })]);
@@ -197,7 +198,9 @@ describe("wpkit parse", () => {
     const page = result.documents.find((document) => document.source.wpId === 20);
 
     expect(car?.contentId).toBe("cars-10");
+    expect(car?.contentIdProvisional).toBe(true);
     expect(page?.contentId).toBe("about");
+    expect(page?.contentIdProvisional).toBeUndefined();
     expect(result.routes.find((route) => route.wpId === 20)?.contentId).toBe("about");
     expect(car?.relations).toContainEqual({ fieldId: "related", toApi: "pages", targetWpId: 20, targetContentId: "about" });
     expect(result.contentIds).toEqual({ strategy: "legacySlug", legacySlug: { adopted: 1, fallback: 1 } });
@@ -208,6 +211,7 @@ describe("wpkit parse", () => {
     const longSlug = "a".repeat(65);
     const overlong = await parse((xml) => xml.replace("<title>About</title><link>https://example.test/about/</link>", `<title>About</title><link>https://example.test/${longSlug}/</link>`), legacySlug);
     expect(overlong.documents.find((document) => document.source.wpId === 20)?.contentId).toBe("pages-20");
+    expect(overlong.documents.find((document) => document.source.wpId === 20)?.contentIdProvisional).toBe(true);
     expect(overlong.contentIds).toEqual({ strategy: "legacySlug", legacySlug: { adopted: 0, fallback: 2 } });
 
     const collision = await parse((xml) => xml
@@ -216,6 +220,7 @@ describe("wpkit parse", () => {
       .replace("<wp:post_type>car</wp:post_type>\n    </item>\n    <item>\n      <title>About</title>", "<wp:post_type>page</wp:post_type>\n    </item>\n    <item>\n      <title>About</title>"), legacySlug);
     expect(collision.documents.find((document) => document.source.wpId === 11)?.contentId).toBe("about");
     expect(collision.documents.find((document) => document.source.wpId === 20)?.contentId).toBe("pages-20");
+    expect(collision.documents.find((document) => document.source.wpId === 20)?.contentIdProvisional).toBe(true);
     expect(collision.validation.warnings).toContainEqual(expect.objectContaining({ code: "contentIdSlugCollision", wpId: 20, api: "pages", details: { slug: "about", previousWpId: 11, fallbackContentId: "pages-20" } }));
     expect(collision.contentIds).toEqual({ strategy: "legacySlug", legacySlug: { adopted: 1, fallback: 2 } });
   });

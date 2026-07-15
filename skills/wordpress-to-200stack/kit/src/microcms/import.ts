@@ -9,6 +9,7 @@ import type { LegacyDocument } from "../parse/index.js";
 
 type FetchLike = typeof fetch;
 type ImportState = Record<string, string>;
+type ContentIdMap = Record<string, string>;
 export type MediaMapEntry = { assetUrl: string; uploadedAt?: string };
 type MediaMap = Record<string, MediaMapEntry>;
 export type ImportOptions = {
@@ -29,7 +30,7 @@ export type ImportOptions = {
 export type ImportFailure = { api: string; contentId: string; phase: "payload" | "upsert" | "relation"; message: string };
 export type ImportWarning = { api: string; contentId: string; fieldId: string; value: unknown; reason: "invalidNumber" | "invalidSelectOption" | "missingMediaMap" };
 export type ImportResult = {
-  total: number; wouldUpload: number; uploaded: number; skipped: number; oversized: number; dryRun: boolean;
+  total: number; wouldUpload: number; wouldAutoAssign: number; autoAssigned: number; provisional: number; uploaded: number; skipped: number; oversized: number; dryRun: boolean;
   failures: ImportFailure[];
   warnings: ImportWarning[];
   totals: Array<{ api: string; expected: number; actual?: number; matches?: boolean }>;
@@ -205,6 +206,18 @@ async function readState(path: string): Promise<ImportState> {
     throw new Error(`import-state.json を読み取れません: ${error instanceof Error ? error.message : String(error)}`);
   }
 }
+async function readContentIdMap(path: string): Promise<ContentIdMap> {
+  try {
+    const parsed = JSON.parse(await readFile(path, "utf8")) as unknown;
+    if (!parsed || Array.isArray(parsed) || typeof parsed !== "object") throw new Error("object ではありません");
+    const entries = Object.entries(parsed);
+    if (entries.some((entry) => typeof entry[1] !== "string" || entry[1] === "")) throw new Error("暫定 contentId と採番済み ID の文字列ペアではありません");
+    return Object.fromEntries(entries);
+  } catch (error: unknown) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return {};
+    throw new Error(`contentid-map.json を読み取れません: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
 async function readMediaMap(path: string): Promise<MediaMap> {
   try {
     const parsed = JSON.parse(await readFile(path, "utf8")) as unknown;
@@ -248,11 +261,20 @@ export async function importDocuments(options: ImportOptions): Promise<ImportRes
   if (!options.dryRun && (!serviceDomain || !apiKey)) throw new Error("MICROCMS_SERVICE_DOMAIN と MICROCMS_API_KEY が必要です");
   if (options.mediaMapPath && !options.config) throw new Error("--media-map には --config が必要です");
   const mediaMap = options.mediaMapPath ? await readMediaMap(options.mediaMapPath) : undefined;
-  const documents = (await readDocuments(options.irDir)).filter((document) => (!options.only || document.api === options.only) && (options.sourceId === undefined || document.source.wpId === options.sourceId));
+  const allDocuments = await readDocuments(options.irDir);
+  const documents = allDocuments.filter((document) => (!options.only || document.api === options.only) && (options.sourceId === undefined || document.source.wpId === options.sourceId));
   const selectedContentIds = new Set(documents.map((document) => document.contentId));
+  const provisionalContentIds = new Set(allDocuments.filter((document) => document.contentIdProvisional).map((document) => document.contentId));
   const statePath = join(options.irDir, "import-state.json");
+  const contentIdMapPath = join(options.irDir, "contentid-map.json");
   const state = await readState(statePath);
-  const result: ImportResult = { total: documents.length, wouldUpload: 0, uploaded: 0, skipped: 0, oversized: 0, dryRun: Boolean(options.dryRun), failures: [], warnings: [], totals: [] };
+  const contentIdMap = await readContentIdMap(contentIdMapPath);
+  let contentIdMapWrites = Promise.resolve();
+  const persistContentIdMap = async (): Promise<void> => {
+    contentIdMapWrites = contentIdMapWrites.then(() => writeFile(contentIdMapPath, `${JSON.stringify(contentIdMap, null, 2)}\n`));
+    return contentIdMapWrites;
+  };
+  const result: ImportResult = { total: documents.length, wouldUpload: 0, wouldAutoAssign: 0, autoAssigned: 0, provisional: documents.filter((document) => document.contentIdProvisional).length, uploaded: 0, skipped: 0, oversized: 0, dryRun: Boolean(options.dryRun), failures: [], warnings: [], totals: [] };
   const candidates: Array<{ document: LegacyDocument; payload: Record<string, unknown>; checksum: string }> = [];
   for (const document of documents) {
     const payload = normalizePayload(document, documentPayload(document), options.config, result.warnings, mediaMap);
@@ -260,11 +282,12 @@ export async function importDocuments(options: ImportOptions): Promise<ImportRes
     // map changes the write payload, so use that payload as the idempotency key
     // and do not let an earlier text-field import suppress the media migration.
     const payloadChecksum = mediaMap ? checksumPayload(payload) : document.payloadChecksum;
-    if (state[document.contentId] === payloadChecksum) { result.skipped += 1; continue; }
+    if (state[document.contentId] === payloadChecksum && (!document.contentIdProvisional || contentIdMap[document.contentId])) { result.skipped += 1; continue; }
     if (byteLength(payload) > MAX_PAYLOAD_BYTES) { result.oversized += 1; result.failures.push({ api: document.api, contentId: document.contentId, phase: "payload", message: `payload が ${MAX_PAYLOAD_BYTES} bytes を超えています` }); continue; }
     candidates.push({ document, payload, checksum: payloadChecksum });
   }
   result.wouldUpload = candidates.length;
+  result.wouldAutoAssign = candidates.filter(({ document }) => document.contentIdProvisional && !contentIdMap[document.contentId]).length;
   if (options.dryRun) return result;
   const fetchImpl = options.fetchImpl ?? fetch;
   const sleep = options.sleep ?? delay;
@@ -273,10 +296,27 @@ export async function importDocuments(options: ImportOptions): Promise<ImportRes
   const headers = { "X-MICROCMS-API-KEY": apiKey!, "Content-Type": "application/json" };
   const limit = pLimit(Math.max(1, options.concurrency ?? 1));
   await Promise.all(candidates.map((candidate) => limit(async () => {
-    const url = `${root}/${encodeURIComponent(candidate.document.api)}/${encodeURIComponent(candidate.document.contentId)}`;
     try {
-      const response = await requestWithRetry(fetchImpl, limiter, url, { method: "PUT", headers, body: JSON.stringify(candidate.payload) }, sleep);
+      const assignedContentId = candidate.document.contentIdProvisional ? contentIdMap[candidate.document.contentId] : undefined;
+      const url = assignedContentId
+        ? `${root}/${encodeURIComponent(candidate.document.api)}/${encodeURIComponent(assignedContentId)}`
+        : candidate.document.contentIdProvisional
+          ? `${root}/${encodeURIComponent(candidate.document.api)}`
+          : `${root}/${encodeURIComponent(candidate.document.api)}/${encodeURIComponent(candidate.document.contentId)}`;
+      const method = assignedContentId || !candidate.document.contentIdProvisional ? "PUT" : "POST";
+      const response = await requestWithRetry(fetchImpl, limiter, url, { method, headers, body: JSON.stringify(candidate.payload) }, sleep);
       if (!response.ok) throw new Error(`HTTP ${response.status}: ${(await response.text().catch(() => "")).slice(0, 300)}`);
+      if (method === "POST") {
+        const body = await response.json().catch(() => undefined) as { id?: unknown } | undefined;
+        if (typeof body?.id !== "string" || body.id === "") throw new Error("POST レスポンスに採番された id がありません");
+        contentIdMap[candidate.document.contentId] = body.id;
+        try { await persistContentIdMap(); }
+        catch (error) {
+          delete contentIdMap[candidate.document.contentId];
+          throw error;
+        }
+        result.autoAssigned += 1;
+      }
       state[candidate.document.contentId] = candidate.checksum;
       result.uploaded += 1;
     } catch (error: unknown) { result.failures.push({ api: candidate.document.api, contentId: candidate.document.contentId, phase: "upsert", message: error instanceof Error ? error.message : String(error) }); }
@@ -284,10 +324,18 @@ export async function importDocuments(options: ImportOptions): Promise<ImportRes
   // Relations must run only after every target content ID has been created.
   for (const document of documents) {
     if (!state[document.contentId]) continue;
+    const assignedDocumentId = document.contentIdProvisional ? contentIdMap[document.contentId] : document.contentId;
+    if (!assignedDocumentId) continue;
     const relationValues = new Map<string, string>();
-    for (const relation of document.relations) if (relation.targetContentId && (!selectedContentIds.has(relation.targetContentId) || state[relation.targetContentId]) && !relationValues.has(relation.fieldId)) relationValues.set(relation.fieldId, relation.targetContentId);
+    for (const relation of document.relations) {
+      if (!relation.targetContentId || relationValues.has(relation.fieldId)) continue;
+      const targetIsProvisional = provisionalContentIds.has(relation.targetContentId);
+      const mappedTargetId = contentIdMap[relation.targetContentId];
+      if ((targetIsProvisional && !mappedTargetId) || (selectedContentIds.has(relation.targetContentId) && !state[relation.targetContentId])) continue;
+      relationValues.set(relation.fieldId, mappedTargetId ?? relation.targetContentId);
+    }
     if (relationValues.size === 0) continue;
-    const url = `${root}/${encodeURIComponent(document.api)}/${encodeURIComponent(document.contentId)}`;
+    const url = `${root}/${encodeURIComponent(document.api)}/${encodeURIComponent(assignedDocumentId)}`;
     try {
       const response = await requestWithRetry(fetchImpl, limiter, url, { method: "PATCH", headers, body: JSON.stringify(Object.fromEntries(relationValues)) }, sleep);
       if (!response.ok) throw new Error(`HTTP ${response.status}: ${(await response.text().catch(() => "")).slice(0, 300)}`);

@@ -57,6 +57,70 @@ describe("wpkit import", () => {
     expect(JSON.parse(await readFile(join(ir, "import-state.json"), "utf8"))).toHaveProperty("cars-10");
   });
 
+  it("POSTs provisional IDs, persists their assigned IDs before the next POST, and skips them on rerun", async () => {
+    const ir = await writeIr([
+      doc({ contentIdProvisional: true, relations: [] }),
+      doc({ source: { wpId: 20, postType: "page", status: "publish" }, api: "pages", contentId: "pages-20", contentIdProvisional: true, relations: [] }),
+    ]);
+    const methods: string[] = [];
+    const mockedFetch: typeof fetch = async (url, init) => {
+      const method = init?.method ?? "GET";
+      methods.push(method);
+      if (method === "POST") {
+        if (String(url).endsWith("/pages")) expect(JSON.parse(await readFile(join(ir, "contentid-map.json"), "utf8"))).toMatchObject({ "cars-10": "assigned-cars" });
+        return response({ id: String(url).endsWith("/cars") ? "assigned-cars" : "assigned-pages" });
+      }
+      return response({ totalCount: 2 });
+    };
+    const first = await importDocuments({ irDir: ir, serviceDomain: "service", apiKey: "key", fetchImpl: mockedFetch, sleep: async () => undefined });
+    const second = await importDocuments({ irDir: ir, serviceDomain: "service", apiKey: "key", fetchImpl: mockedFetch, sleep: async () => undefined });
+    expect(first).toMatchObject({ provisional: 2, wouldAutoAssign: 2, autoAssigned: 2, uploaded: 2, failures: [] });
+    expect(JSON.parse(await readFile(join(ir, "contentid-map.json"), "utf8"))).toEqual({ "cars-10": "assigned-cars", "pages-20": "assigned-pages" });
+    expect(JSON.parse(await readFile(join(ir, "import-state.json"), "utf8"))).toMatchObject({ "cars-10": "from-parse", "pages-20": "from-parse" });
+    expect(second).toMatchObject({ provisional: 2, skipped: 2, wouldAutoAssign: 0, autoAssigned: 0, uploaded: 0 });
+    expect(methods.filter((method) => method === "POST")).toHaveLength(2);
+  });
+
+  it("uses mapped IDs for provisional PUT and relation PATCH targets", async () => {
+    const ir = await writeIr([
+      doc({ contentIdProvisional: true, relations: [{ fieldId: "related", toApi: "pages", targetWpId: 20, targetContentId: "pages-20" }] }),
+      doc({ source: { wpId: 20, postType: "page", status: "publish" }, api: "pages", contentId: "pages-20", contentIdProvisional: true, relations: [] }),
+    ]);
+    await writeFile(join(ir, "contentid-map.json"), JSON.stringify({ "cars-10": "assigned-cars", "pages-20": "assigned-pages" }));
+    const calls: Array<{ method: string; url: string; body?: Record<string, unknown> }> = [];
+    const result = await importDocuments({ irDir: ir, serviceDomain: "service", apiKey: "key", fetchImpl: async (url, init) => {
+      calls.push({ method: init?.method ?? "GET", url: String(url), ...(init?.body ? { body: JSON.parse(String(init.body)) as Record<string, unknown> } : {}) });
+      return init?.method === "GET" ? response({ totalCount: 2 }) : response();
+    }, sleep: async () => undefined });
+    expect(result).toMatchObject({ provisional: 2, wouldAutoAssign: 0, autoAssigned: 0, uploaded: 2, failures: [] });
+    expect(calls.filter((call) => call.method === "PUT").map((call) => call.url)).toEqual([
+      "https://service.microcms.io/api/v1/cars/assigned-cars",
+      "https://service.microcms.io/api/v1/pages/assigned-pages",
+    ]);
+    expect(calls.find((call) => call.method === "PATCH")).toMatchObject({ url: "https://service.microcms.io/api/v1/cars/assigned-cars", body: { related: "assigned-pages" } });
+  });
+
+  it("skips relations to an unassigned provisional target", async () => {
+    const ir = await writeIr([
+      doc({ relations: [{ fieldId: "related", toApi: "pages", targetWpId: 20, targetContentId: "pages-20" }] }),
+      doc({ source: { wpId: 20, postType: "page", status: "publish" }, api: "pages", contentId: "pages-20", contentIdProvisional: true, relations: [] }),
+    ]);
+    await writeFile(join(ir, "import-state.json"), JSON.stringify({ "cars-10": "from-parse" }));
+    const methods: string[] = [];
+    const result = await importDocuments({ irDir: ir, sourceId: 10, serviceDomain: "service", apiKey: "key", fetchImpl: async (_url, init) => {
+      methods.push(init?.method ?? "GET");
+      return response({ totalCount: 1 });
+    }, sleep: async () => undefined });
+    expect(result).toMatchObject({ skipped: 1, failures: [] });
+    expect(methods).not.toContain("PATCH");
+  });
+
+  it("reports provisional auto-assignment candidates without POSTing in dry-run", async () => {
+    const ir = await writeIr([doc({ contentIdProvisional: true, relations: [] })]);
+    const result = await importDocuments({ irDir: ir, dryRun: true, fetchImpl: async () => { throw new Error("must not fetch"); } });
+    expect(result).toMatchObject({ provisional: 1, wouldUpload: 1, wouldAutoAssign: 1, autoAssigned: 0, uploaded: 0 });
+  });
+
   it("does not send requests during dry-run and reports oversized payloads", async () => {
     const ir = await writeIr([doc({ content: { title: "x".repeat(190 * 1024), legacyBodyHtml: "", excerpt: "", publishedAt: "" }, relations: [] })]);
     const result = await importDocuments({ irDir: ir, dryRun: true, fetchImpl: async () => { throw new Error("must not fetch"); } });

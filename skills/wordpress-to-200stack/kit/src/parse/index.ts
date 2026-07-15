@@ -21,6 +21,8 @@ export type LegacyDocument = {
   api: string;
   kind?: string;
   contentId: string;
+  /** True when legacySlug could not be used and import must request a microCMS-generated ID. */
+  contentIdProvisional?: true;
   route: { legacyUrl: string; path: string; segments: string[]; trailingSlash: boolean };
   content: { title: string; legacyBodyHtml: string; excerpt: string; publishedAt: string };
   seo?: { title?: string; description?: string; noindex?: boolean };
@@ -127,8 +129,9 @@ type ContentIdCandidate = { item: WxrItem; api: string; route: LegacyDocument["r
 type ContentIdSummary = ParseResult["contentIds"];
 
 /** Determine every content ID before emitting routes or documents so all consumers share one source of truth. */
-function deriveContentIds(candidates: readonly ContentIdCandidate[], strategy: ContentIdSummary["strategy"], warnings: ValidationIssue[]): { bySource: Map<string, string>; summary: ContentIdSummary } {
+function deriveContentIds(candidates: readonly ContentIdCandidate[], strategy: ContentIdSummary["strategy"], warnings: ValidationIssue[]): { bySource: Map<string, string>; provisionalSources: Set<string>; summary: ContentIdSummary } {
   const bySource = new Map<string, string>();
+  const provisionalSources = new Set<string>();
   const claimedSlugs = new Map<string, Map<string, number>>();
   let adopted = 0;
   let fallback = 0;
@@ -136,6 +139,7 @@ function deriveContentIds(candidates: readonly ContentIdCandidate[], strategy: C
   for (const { item, api, route } of candidates) {
     const fallbackId = `${api}-${item.wpId}`;
     let contentId = fallbackId;
+    let provisional = false;
     if (strategy === "legacySlug") {
       const slug = route.segments.at(-1);
       if (slug && /^[A-Za-z0-9_-]+$/.test(slug) && slug.length <= 64) {
@@ -148,6 +152,7 @@ function deriveContentIds(candidates: readonly ContentIdCandidate[], strategy: C
           adopted += 1;
         } else {
           fallback += 1;
+          provisional = true;
           warnings.push({
             code: "contentIdSlugCollision",
             wpId: item.wpId,
@@ -156,11 +161,16 @@ function deriveContentIds(candidates: readonly ContentIdCandidate[], strategy: C
             details: { slug, previousWpId, fallbackContentId: fallbackId },
           });
         }
-      } else fallback += 1;
+      } else {
+        fallback += 1;
+        provisional = true;
+      }
     }
-    bySource.set(`${api}:${item.wpId}`, contentId);
+    const source = `${api}:${item.wpId}`;
+    bySource.set(source, contentId);
+    if (provisional) provisionalSources.add(source);
   }
-  return { bySource, summary: { strategy, legacySlug: { adopted, fallback } } };
+  return { bySource, provisionalSources, summary: { strategy, legacySlug: { adopted, fallback } } };
 }
 
 function stable(value: unknown): unknown {
@@ -324,7 +334,7 @@ export function parseMigration(config: MigrationConfig, xml: string): ParseResul
   }
   const contentIdStrategy = config.contentIdStrategy ?? "wpId";
   const contentIdCandidates = candidates.map(({ item, api }) => ({ item, api, route: routeFor(item) }));
-  const { bySource: contentIds, summary: contentIdSummary } = deriveContentIds(contentIdCandidates, contentIdStrategy, warnings);
+  const { bySource: contentIds, provisionalSources, summary: contentIdSummary } = deriveContentIds(contentIdCandidates, contentIdStrategy, warnings);
   const routes = contentIdCandidates.map(({ item, api, route }) => ({ ...route, api, contentId: contentIds.get(`${api}:${item.wpId}`)!, wpId: item.wpId, legacyUrl: item.link }));
   const routesByPath = new Map<string, RouteEntry>();
   for (const route of routes) {
@@ -387,7 +397,8 @@ export function parseMigration(config: MigrationConfig, xml: string): ParseResul
     for (const value of [seo?.title, seo?.description]) if (value && /%%[^%]+%%/.test(value)) warnings.push({ code: "yoastTemplateVariable", wpId: item.wpId, api, message: `Yoast テンプレート変数を未解決のまま保持しました: ${value}` });
     const document: Omit<LegacyDocument, "payloadChecksum"> = {
       source: { wpId: item.wpId, postType: item.postType, status: item.status, ...(item.postModifiedGmt ? { modifiedGmt: item.postModifiedGmt } : {}) },
-      api, ...(Array.isArray(definition.from) ? { kind: item.postType } : {}), contentId: contentIds.get(`${api}:${item.wpId}`)!, route,
+      api, ...(Array.isArray(definition.from) ? { kind: item.postType } : {}), contentId: contentIds.get(`${api}:${item.wpId}`)!,
+      ...(provisionalSources.has(`${api}:${item.wpId}`) ? { contentIdProvisional: true } : {}), route,
       content: { title: item.title, legacyBodyHtml: htmlResult.html, excerpt: item.excerpt, publishedAt: item.postDateGmt },
       ...(seo && Object.keys(seo).length > 0 ? { seo } : {}),
       taxonomies: item.taxonomies.filter((taxonomy) => definition.taxonomies?.includes(taxonomy.taxonomy) ?? false), fields, repeaters, relations,
