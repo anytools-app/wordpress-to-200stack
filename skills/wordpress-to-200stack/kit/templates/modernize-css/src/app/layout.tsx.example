@@ -1,0 +1,46 @@
+import type { ReactNode } from "react";
+
+const legacyChromeObserverScript = `(function(){
+if(window.__legacyChromeObserver)return;
+function apply(marker){
+  var body=document.body;
+  if(!body||!marker)return;
+  body.className=marker.getAttribute("data-body-class")||"";
+  var bodyId=marker.getAttribute("data-body-id")||"";
+  if(bodyId){body.id=bodyId;}else{body.removeAttribute("id");}
+  var stylesheet=new URL(marker.getAttribute("data-stylesheet")||"",document.baseURI).href;
+  var links=document.querySelectorAll("link[data-legacy-stylesheet]");
+  for(var i=0;i<links.length;i++){
+    var link=links[i];
+    link.disabled=new URL(link.getAttribute("href")||link.href,document.baseURI).href!==stylesheet;
+  }
+}
+function applyLast(){
+  var markers=document.querySelectorAll("[data-legacy-chrome]");
+  apply(markers[markers.length-1]);
+}
+var observer=new MutationObserver(function(mutations){
+  for(var i=0;i<mutations.length;i++){
+    var nodes=mutations[i].addedNodes;
+    for(var j=0;j<nodes.length;j++){
+      var node=nodes[j];
+      if(node.nodeType===1&&(node.matches("[data-legacy-chrome]")||node.querySelector("[data-legacy-chrome]"))){applyLast();return;}
+    }
+  }
+});
+window.__legacyChromeObserver=observer;
+observer.observe(document.documentElement,{childList:true,subtree:true});
+document.addEventListener("DOMContentLoaded",applyLast);
+})();`;
+
+export default function RootLayout({ children }: Readonly<{ children: ReactNode }>) {
+  return <html lang="ja"><head>
+    <script dangerouslySetInnerHTML={{ __html: legacyChromeObserverScript }} />
+  </head><body suppressHydrationWarning>{children}</body></html>;
+}
+
+// 各ページでは LegacyChrome を可視コンテンツの後に置く。先頭に置くと、head へ
+// ホイストされる link/meta が Next のスクロールリセットを壊すことがある。
+// export default async function Page() {
+//   return <><main>{/* visible content */}</main><LegacyChrome path="/" /></>;
+// }

@@ -96,3 +96,39 @@
 - 1委任 = 1コンポーネント(またはトークン抽出1バッチ)。「Header の Module 化+旧ルール削除+全 surface 再スキャン」で1単位
 - 指示書に必ず書く: 対象コンポーネント、削除してよい旧ルールの特定(ファイル・行)、値を変えない制約、検証コマンド(build + scan)、禁止(スコープ外の legacy 削除・値の丸め・`!important` 追加)
 - 移行フェーズの指示書雛形(`templates.md`)とは別物。混用しない
+
+---
+
+# 配信モダナイズ(CSS delivery / SPA化)— 任意トラック
+
+外部 CSS の自前化、未使用 CSS の削減、CSS bundle 配信、`next/link` による SPA 遷移を扱うトラック。上の CSS Hardening(CSS Modules 化・tokens 導入)とは**独立**であり、どちらか一方だけを採用してよい。移行の完了条件には含めない。
+
+汎用アセットは [`kit/templates/modernize-css/`](kit/templates/modernize-css/) に置く。案件へのコピー方法、依存、コマンド例は同ディレクトリの README を正とする。
+
+## 開始条件
+
+- [ ] 移行ゲートを通過し、公開済みまたは公開可能な状態
+- [ ] 全対象 surface の fidelity baseline と approvals が凍結済み
+- [ ] `legacy-meta.json` に URL ごとの stylesheet と body 属性があり、`apply-legacy-body` を含む静的出力フローが動作済み
+- [ ] CSS の byte 削減や SPA 化を先行させず、fidelity を再現することを最優先に合意済み
+
+## Phase(必要なものだけ採用する)
+
+1. **外部 CDN CSS の自前化**: `vendor-css.mjs` で legacy-meta の stylesheet とテーマ CSS の外部 `@import` をフォント・画像ごと `public/vendor/` へ再帰ローカル化する。元 URL → ローカル URL は `public/vendor/manifest.json` に出力し、legacy chrome 解決時に適用する。
+2. **未使用 CSS 削減**: `audit-css.mjs` で全出力ページ × 全 CSS ルールを棚卸しする。動的 class safelist と JS / TSX 文字列走査を含むため、Coverage だけで削除しない。司令塔レビュー後に `prune-css.mjs` を `--dry-run` から実行し、`@font-face` / `@keyframes` を保護したまま unused selector のみ削除する。
+3. **bundle 統合 + minify**: `build-css-bundles.mjs` と `lib/bundle-css.mjs` で、ページ別 stylesheet 構成のユニーク集合ごとに `@import` をインライン展開・`url()` 絶対化・minify し、`public/assets/css/bundle-<hash8>.css` を prebuild で生成する。
+4. **`next/link` SPA 化 + legacy chrome 同期**: `SiteLink.tsx` は内部パスだけを `next/link` にする。`LegacyChrome.tsx` は React 19 の `<link precedence>` と hidden marker を出し、layout の MutationObserver が遷移時に body 属性と有効 bundle を同期する。
+
+## 実装上の罠(必ず設計に含める)
+
+- ページ JSX の先頭に head へホイストされる要素（`<link>` / `<meta>` を返すコンポーネント）を置くと Next のスクロールリセットが壊れる。`LegacyChrome` / canonical 系は可視コンテンツの後に置く。
+- React は JSX のインライン `<script>` をクライアント遷移時に実行しない（SSR 初期ロードのみ）。ペイント前同期は MutationObserver + marker 方式で行う。
+- React 19 の precedence stylesheet はアンマウント後も head に残る。複数 bundle の同時適用によるカスケード競合を防ぐため、Observer は現行 bundle 以外を常時 `disabled` にする。
+- `trailingSlash: true` では `usePathname()` が末尾スラッシュ付きになる。legacy metadata とのパス照合は正規化してから行う。
+
+## 検証ゲート
+
+1. 見た目だけで判断しない。遷移ペアごとに Playwright で「遷移後の body class / id・有効 bundle 集合 == 同 URL 直接ロード」を機械判定する。
+2. CDP スクリーンキャストで遷移フレームを取得し、無スタイルフレームが 0 であることを確認する。
+3. prune / bundle 化の前後は `css-visual-diff.mjs` で、対象 CSS を参照する全ページを網羅してピクセル比較する。diff 率 0 以外は進めない。
+4. ネットワークスロットリング下でも FOUC フレームを確認する。初回 bundle 読み込みは React が commit を保留するため、無スタイルフレームは 0 になる想定で検査する。
