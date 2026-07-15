@@ -137,8 +137,19 @@ export function collectCmsImageUrls(documents: readonly LegacyDocument[], config
   return { fields: [...fields].sort(), body: [...body].sort(), urls: [...urls].sort() };
 }
 
-async function preparedUpload(body: Buffer): Promise<{ body: Buffer; type: string; filenameExtension: string; converted: boolean }> {
-  if (body.byteLength <= MAX_BYTES) return { body, type: "application/octet-stream", filenameExtension: "", converted: false };
+const MIME_BY_EXTENSION: Record<string, string> = {
+  ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png", ".gif": "image/gif",
+  ".webp": "image/webp", ".svg": "image/svg+xml", ".avif": "image/avif", ".bmp": "image/bmp",
+};
+
+function mimeFor(url: string): string {
+  const match = new URL(url).pathname.toLowerCase().match(/\.[a-z0-9]+$/);
+  return (match && MIME_BY_EXTENSION[match[0]]) || "application/octet-stream";
+}
+
+async function preparedUpload(body: Buffer, url: string): Promise<{ body: Buffer; type: string; filenameExtension: string; converted: boolean }> {
+  // microCMS は Content-Type で画像判定する。octet-stream だとファイル扱いになり画像フィールド・画像APIが使えない。
+  if (body.byteLength <= MAX_BYTES) return { body, type: mimeFor(url), filenameExtension: "", converted: false };
   let quality = 80;
   let converted: Buffer | undefined;
   do {
@@ -203,7 +214,7 @@ export async function uploadMedia(options: MediaUploadOptions): Promise<MediaUpl
   const endpoint = managementUrl(serviceDomain);
   for (const entry of cached) {
     try {
-      const prepared = await preparedUpload(entry.body);
+      const prepared = await preparedUpload(entry.body, entry.url);
       const form = new FormData();
       form.set("file", new Blob([new Uint8Array(prepared.body)], { type: prepared.type }), filenameFor(entry.url, prepared.filenameExtension));
       await limiter.take();
@@ -213,9 +224,15 @@ export async function uploadMedia(options: MediaUploadOptions): Promise<MediaUpl
       if (typeof payload.url !== "string" || !payload.url) throw new Error("レスポンスに配信 URL がありません");
       map[entry.url] = { assetUrl: payload.url, uploadedAt: now().toISOString() };
       result.uploaded += 1;
+      // 長時間ランの中断・クラッシュで進捗を失わないよう逐次永続化する(重複アップロード防止)。
+      if (result.uploaded % 25 === 0) await persistMap();
     } catch (error: unknown) { result.failures.push({ url: entry.url, message: error instanceof Error ? error.message : String(error) }); }
   }
-  await mkdir(dirname(options.mapPath), { recursive: true });
-  await writeFile(options.mapPath, `${JSON.stringify(map, null, 2)}\n`);
+  await persistMap();
+
+  async function persistMap(): Promise<void> {
+    await mkdir(dirname(options.mapPath), { recursive: true });
+    await writeFile(options.mapPath, `${JSON.stringify(map, null, 2)}\n`);
+  }
   return result;
 }
