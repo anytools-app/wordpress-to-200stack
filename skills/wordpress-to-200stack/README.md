@@ -37,6 +37,7 @@ skills/wordpress-to-200stack/
 ├── SKILL.md       # 移行フロー・ゲート・判断基準(正)
 ├── design.md      # 設計書(kit のアーキテクチャと設計判断)
 ├── templates.md   # mapping config の書式・型の決め方チェックリスト
+├── modernize.md   # 引き渡し後の CSS モダナイズ手順(任意工程。移行スコープ外)
 ├── lessons.md     # 実測記録・事故例
 └── kit/           # wpkit CLI(TypeScript。vitest テスト・Playwright 同梱)
 ```
