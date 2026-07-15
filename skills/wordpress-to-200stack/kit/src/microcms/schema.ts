@@ -18,7 +18,7 @@ function fieldSchema(field: Pick<FieldDef, "fieldId" | "label" | "type" | "optio
   const common = { fieldId: field.fieldId, name: field.label ?? field.fieldId, description: null, required };
   switch (field.type) {
     case "string": return { ...common, kind: "text", textSizeLimitValidation: null, patternMatchValidation: null, isUnique: false };
-    case "image": return { ...common, kind: "image" };
+    case "image": return { ...common, kind: "media" };
     case "text":
     case "html": return { ...common, kind: "textArea", textSizeLimitValidation: null, patternMatchValidation: null };
     case "number": return { ...common, kind: "number", numberSizeLimitValidation: null };
