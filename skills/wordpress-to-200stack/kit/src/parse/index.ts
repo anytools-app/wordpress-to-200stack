@@ -40,6 +40,10 @@ export type ParseResult = {
   attachments: AttachmentEntry[];
   relations: { resolved: LegacyDocument["relations"]; unresolved: Array<LegacyDocument["relations"][number] & { reason: "targetExcluded" | "targetMissing" }> };
   excluded: Array<{ wpId: number; postType: string; status: string; reason: string }>;
+  inlineStyles: {
+    summary: { elements: number; pages: number; properties: Array<{ property: string; count: number }> };
+    pages: Array<{ wpId: number; api: string; path: string; elements: number; properties: Array<{ property: string; count: number }> }>;
+  };
   validation: { errors: ValidationIssue[]; warnings: ValidationIssue[] };
 };
 
@@ -229,6 +233,12 @@ function aggregateInternalLinkWarnings(warnings: ValidationIssue[]): ValidationI
   ];
 }
 
+function sortedStyleProperties(properties: Record<string, number>): Array<{ property: string; count: number }> {
+  return Object.entries(properties)
+    .map(([property, count]) => ({ property, count }))
+    .sort((left, right) => right.count - left.count || left.property.localeCompare(right.property));
+}
+
 function ndjson(values: unknown[]): string { return values.map((value) => JSON.stringify(value)).join("\n") + (values.length > 0 ? "\n" : ""); }
 
 export function parseMigration(config: MigrationConfig, xml: string): ParseResult {
@@ -283,11 +293,19 @@ export function parseMigration(config: MigrationConfig, xml: string): ParseResul
   const assumedPostTypes = new Set(config.linkCheck?.assumeExistPostTypes ?? []);
   for (const item of exp.items) if (item.status === "publish" && assumedPostTypes.has(item.postType)) assumedPaths.add(routeFor(item).path);
   const knownRoutePaths = new Set([...routes.map((entry) => entry.path), ...assumedPaths]);
+  const inlineStylePages: ParseResult["inlineStyles"]["pages"] = [];
   const documents: LegacyDocument[] = candidates.map(({ item, api, definition }) => {
     const route = routeFor(item);
     const assets = new Set<string>();
     const oembed = expandOembedCache(item);
-    const htmlResult = definition.body === "none" ? { html: "", assets: [], warnings: { unresolvedInternalLinks: [], removedScripts: 0, removedIframes: [] } satisfies HtmlWarning } : rewriteLegacyHtml(oembed.html, { site: config.site, routePaths: knownRoutePaths, allowIframeHosts });
+    const htmlResult = definition.body === "none" ? { html: "", assets: [], warnings: { unresolvedInternalLinks: [], removedScripts: 0, removedIframes: [], inlineStyles: { elements: 0, properties: {} } } satisfies HtmlWarning } : rewriteLegacyHtml(oembed.html, { site: config.site, routePaths: knownRoutePaths, allowIframeHosts });
+    if (htmlResult.warnings.inlineStyles.elements > 0) inlineStylePages.push({
+      wpId: item.wpId,
+      api,
+      path: route.path,
+      elements: htmlResult.warnings.inlineStyles.elements,
+      properties: sortedStyleProperties(htmlResult.warnings.inlineStyles.properties),
+    });
     for (const asset of htmlResult.assets) assets.add(asset);
     for (const url of oembed.missing) warnings.push({ code: "oembedCacheMissing", wpId: item.wpId, api, message: `oEmbed キャッシュが見つかりません: ${url}`, details: { url } });
     for (const link of htmlResult.warnings.unresolvedInternalLinks) warnings.push({ code: "unresolvedInternalLink", wpId: item.wpId, api, message: `台帳にない内部リンク: ${link}`, details: { url: link } });
@@ -350,7 +368,23 @@ export function parseMigration(config: MigrationConfig, xml: string): ParseResul
     const { payloadChecksum: _checksum, ...payload } = document;
     document.payloadChecksum = checksum(payload);
   }
-  return { documents, routes, attachments, relations: { resolved, unresolved }, excluded, validation: { errors, warnings: aggregateInternalLinkWarnings(warnings) } };
+  inlineStylePages.sort((left, right) => right.elements - left.elements || left.wpId - right.wpId);
+  const inlineStyleProperties: Record<string, number> = {};
+  for (const page of inlineStylePages) for (const { property, count } of page.properties) inlineStyleProperties[property] = (inlineStyleProperties[property] ?? 0) + count;
+  const inlineStyles: ParseResult["inlineStyles"] = {
+    summary: { elements: inlineStylePages.reduce((total, page) => total + page.elements, 0), pages: inlineStylePages.length, properties: sortedStyleProperties(inlineStyleProperties) },
+    pages: inlineStylePages,
+  };
+  if (inlineStyles.summary.elements > 0) {
+    const { elements, pages, properties } = inlineStyles.summary;
+    warnings.push({
+      code: "inlineStyleAttributes",
+      message: `inline style 属性が ${pages} ページ / ${elements} 要素にあります。サイトテンプレートのサニタイザは style 属性を除去するため、表示が原文と異なる可能性があります(詳細: inline-styles.json)`,
+      details: { elements, pages, topProperties: properties.slice(0, 10) },
+      count: elements,
+    });
+  }
+  return { documents, routes, attachments, relations: { resolved, unresolved }, excluded, inlineStyles, validation: { errors, warnings: aggregateInternalLinkWarnings(warnings) } };
 }
 
 export async function writeParseResult(result: ParseResult, outDir: string): Promise<void> {
@@ -360,6 +394,7 @@ export async function writeParseResult(result: ParseResult, outDir: string): Pro
     writeFile(join(outDir, "routes.json"), `${JSON.stringify(result.routes, null, 2)}\n`),
     writeFile(join(outDir, "attachments.ndjson"), ndjson(result.attachments)),
     writeFile(join(outDir, "relations.json"), `${JSON.stringify(result.relations, null, 2)}\n`),
+    writeFile(join(outDir, "inline-styles.json"), `${JSON.stringify(result.inlineStyles, null, 2)}\n`),
     writeFile(join(outDir, "excluded.ndjson"), ndjson(result.excluded)),
     writeFile(join(outDir, "validation-report.json"), `${JSON.stringify(result.validation, null, 2)}\n`),
     writeFile(join(outDir, "validation-report.md"), validationMarkdown(result.validation)),

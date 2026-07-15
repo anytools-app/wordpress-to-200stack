@@ -4,6 +4,7 @@ export type HtmlWarning = {
   unresolvedInternalLinks: string[];
   removedScripts: number;
   removedIframes: string[];
+  inlineStyles: { elements: number; properties: Record<string, number> };
 };
 export type RewriteHtmlContext = {
   site: { origin: string; mediaHost: string };
@@ -51,7 +52,7 @@ export function rewriteLegacyHtml(html: string, context: RewriteHtmlContext): { 
   const mediaHost = new URL(context.site.mediaHost);
   const $ = cheerio.load(html, undefined, false);
   const assets = new Set<string>();
-  const warnings: HtmlWarning = { unresolvedInternalLinks: [], removedScripts: 0, removedIframes: [] };
+  const warnings: HtmlWarning = { unresolvedInternalLinks: [], removedScripts: 0, removedIframes: [], inlineStyles: { elements: 0, properties: {} } };
 
   $("img").each((_, element) => {
     const image = $(element);
@@ -93,6 +94,15 @@ export function rewriteLegacyHtml(html: string, context: RewriteHtmlContext): { 
   });
   $("*").each((_, element) => {
     const attribs = "attribs" in element ? element.attribs : undefined;
+    if (Object.hasOwn(attribs ?? {}, "style")) {
+      warnings.inlineStyles.elements += 1;
+      for (const declaration of (attribs?.style ?? "").split(";")) {
+        const colon = declaration.indexOf(":");
+        if (colon < 0) continue;
+        const property = declaration.slice(0, colon).trim().toLowerCase();
+        if (property) warnings.inlineStyles.properties[property] = (warnings.inlineStyles.properties[property] ?? 0) + 1;
+      }
+    }
     for (const attribute of Object.keys(attribs ?? {})) {
       if (/^on/i.test(attribute)) $(element).removeAttr(attribute);
     }
