@@ -148,13 +148,26 @@ function rewriteBodyMedia(document: LegacyDocument, value: unknown, mediaMap: Me
   });
 }
 
+function stripNullValues(payload: Record<string, unknown>): Record<string, unknown> {
+  // microCMS はメディアフィールドに null を送ると 504 でタイムアウトする(2026-07 実測)。
+  // 新規入稿で null を送る必要はないため、null/undefined のキーは送信しない(repeater 内も同様)。
+  const cleaned: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(payload)) {
+    if (value === null || value === undefined) continue;
+    cleaned[key] = Array.isArray(value)
+      ? value.map((item) => (item && typeof item === "object" && !Array.isArray(item) ? stripNullValues(item as Record<string, unknown>) : item))
+      : value;
+  }
+  return cleaned;
+}
+
 function normalizePayload(document: LegacyDocument, payload: Record<string, unknown>, config: MigrationConfig | undefined, warnings: ImportWarning[], mediaMap?: MediaMap): Record<string, unknown> {
   const definition = config?.apis[document.api];
   const bodyMappedPayload = mediaMap && "legacyBodyHtml" in payload
     ? { ...payload, legacyBodyHtml: rewriteBodyMedia(document, payload.legacyBodyHtml, mediaMap, warnings) }
     : payload;
   // --config is opt-in so existing import behavior remains unchanged.
-  if (!definition) return bodyMappedPayload;
+  if (!definition) return stripNullValues(bodyMappedPayload);
   const fields = fieldsForApi(definition);
   const imageMappedPayload = mediaMap ? replaceMappedImages(document, bodyMappedPayload, definition, mediaMap, warnings) : bodyMappedPayload;
   const normalized: Record<string, unknown> = {};
@@ -186,7 +199,7 @@ function normalizePayload(document: LegacyDocument, payload: Record<string, unkn
     }
     normalized[fieldId] = value;
   }
-  return normalized;
+  return stripNullValues(normalized);
 }
 
 async function readDocuments(irDir: string): Promise<LegacyDocument[]> {
@@ -238,13 +251,18 @@ async function requestWithRetry(fetchImpl: FetchLike, limiter: WriteRateLimiter,
   for (let retry = 0; retry <= 5; retry += 1) {
     await limiter.take();
     try {
-      const response = await fetchImpl(url, init);
+      // 応答が返らないハング(504系の間欠障害時に実測)をリトライへ転換するため60秒で打ち切る。
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 60_000);
+      let response: Response;
+      try { response = await fetchImpl(url, { ...init, signal: controller.signal }); }
+      finally { clearTimeout(timer); }
       if (response.status !== 429 && response.status < 500) return response;
       last = response;
     } catch (error) {
       if (retry === 5) throw error;
     }
-    if (retry < 5) await sleep(250 * (2 ** retry));
+    if (retry < 5) await sleep(Math.min(2_000 * (2 ** retry), 30_000));
   }
   return last!;
 }
@@ -304,7 +322,13 @@ export async function importDocuments(options: ImportOptions): Promise<ImportRes
           ? `${root}/${encodeURIComponent(candidate.document.api)}`
           : `${root}/${encodeURIComponent(candidate.document.api)}/${encodeURIComponent(candidate.document.contentId)}`;
       const method = assignedContentId || !candidate.document.contentIdProvisional ? "PUT" : "POST";
-      const response = await requestWithRetry(fetchImpl, limiter, url, { method, headers, body: JSON.stringify(candidate.payload) }, sleep);
+      let response = await requestWithRetry(fetchImpl, limiter, url, { method, headers, body: JSON.stringify(candidate.payload) }, sleep);
+      if (response.status === 400 && method === "PUT") {
+        const text = await response.text().catch(() => "");
+        // microCMS の PUT は新規作成専用。既存コンテンツは PATCH で更新する(state 消失時も冪等に再実行できるように)。
+        if (/already exists/i.test(text)) response = await requestWithRetry(fetchImpl, limiter, url, { method: "PATCH", headers, body: JSON.stringify(candidate.payload) }, sleep);
+        else throw new Error(`HTTP 400: ${text.slice(0, 300)}`);
+      }
       if (!response.ok) throw new Error(`HTTP ${response.status}: ${(await response.text().catch(() => "")).slice(0, 300)}`);
       if (method === "POST") {
         const body = await response.json().catch(() => undefined) as { id?: unknown } | undefined;

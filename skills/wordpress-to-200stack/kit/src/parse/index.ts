@@ -142,7 +142,8 @@ function deriveContentIds(candidates: readonly ContentIdCandidate[], strategy: C
     let provisional = false;
     if (strategy === "legacySlug") {
       const slug = route.segments.at(-1);
-      if (slug && /^[A-Za-z0-9_-]+$/.test(slug) && slug.length <= 64) {
+      // microCMS の contentId は小文字英数字と - _ のみ(大文字は 400。2026-07 実測)
+      if (slug && /^[a-z0-9_-]+$/.test(slug) && slug.length <= 64) {
         const apiSlugs = claimedSlugs.get(api) ?? new Map<string, number>();
         const previousWpId = apiSlugs.get(slug);
         if (previousWpId === undefined) {
