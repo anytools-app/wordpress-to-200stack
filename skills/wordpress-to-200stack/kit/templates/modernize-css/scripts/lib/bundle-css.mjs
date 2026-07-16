@@ -49,6 +49,21 @@ function importHref(sourceHref, href) {
   return `${resolved.pathname}${resolved.search}`;
 }
 
+function ensureFontDisplaySwap(ast) {
+  // 自前配信フォントのFOIT対策: font-display未指定の@font-faceにswapを付与(実測: フォントロード中に見出しが非表示になる)。
+  csstree.walk(ast, {
+    visit: "Atrule",
+    enter(node) {
+      if (node.name.toLowerCase() !== "font-face" || !node.block) return;
+      let has = false;
+      node.block.children.forEach((child) => {
+        if (child.type === "Declaration" && child.property.toLowerCase() === "font-display") has = true;
+      });
+      if (!has) node.block.children.appendData({ type: "Declaration", important: false, property: "font-display", value: { type: "Raw", value: "swap" } });
+    },
+  });
+}
+
 function wrapImportedCss(css, media) {
   if (!media) return css;
   return `@media ${media}{${css}}`;
@@ -110,10 +125,12 @@ export async function writeCssBundles({ sourceDir, outputDir, bundles }) {
     const firstCharset = { value: undefined };
     const contents = [];
     for (const stylesheet of bundle.stylesheets) contents.push(await inlineCss(stylesheet, [], firstCharset));
-    const css = csstree.generate(csstree.parse(`${firstCharset.value ?? ""}${contents.join("")}`, {
+    const ast = csstree.parse(`${firstCharset.value ?? ""}${contents.join("")}`, {
       parseCustomProperty: true,
       parseValue: true,
-    }));
+    });
+    ensureFontDisplaySwap(ast);
+    const css = csstree.generate(ast);
     const hash = createHash("sha256").update(css).digest("hex").slice(0, 8);
     const href = `/assets/css/bundle-${hash}.css`;
     await writeFile(new URL(`bundle-${hash}.css`, `file://${cssDir}/`).pathname, css);

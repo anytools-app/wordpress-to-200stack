@@ -52,6 +52,21 @@ var observer=new MutationObserver(function(mutations){
 window.__legacyChromeObserver=observer;
 observer.observe(document.documentElement,{childList:true,subtree:true});
 document.addEventListener("DOMContentLoaded",applyLast);
+// 全バンドルをアイドル時にpreloadし、遷移時の切替待ち(旧CSS表示の時間)をほぼゼロにする。
+function preloadBundles(){
+  fetch("/assets/css/bundles.json").then(function(r){return r.ok?r.json():null;}).then(function(manifest){
+    if(!manifest)return;
+    Object.keys(manifest).forEach(function(href){
+      if(document.querySelector('link[href="'+href+'"]'))return;
+      var link=document.createElement("link");
+      link.rel="preload";link.as="style";link.href=href;
+      document.head.appendChild(link);
+    });
+  }).catch(function(){});
+}
+window.addEventListener("load",function(){
+  (window.requestIdleCallback||function(f){setTimeout(f,1500);})(preloadBundles);
+});
 })();`;
 
 export default function RootLayout({ children }: Readonly<{ children: ReactNode }>) {
