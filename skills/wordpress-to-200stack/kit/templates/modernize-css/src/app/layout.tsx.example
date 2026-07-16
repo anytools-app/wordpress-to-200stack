@@ -64,9 +64,16 @@ function preloadBundles(){
     });
   }).catch(function(){});
 }
-window.addEventListener("load",function(){
-  (window.requestIdleCallback||function(f){setTimeout(f,1500);})(preloadBundles);
-});
+// 画像ロード完了(load)を待つとユーザーの初回遷移に間に合わない実測があるため、
+// DOM構築直後のアイドル(上限800ms)で先読みする。preloadは低優先で初期描画を阻害しない。
+function schedulePreload(){
+  if(window.__legacyBundlePreloaded)return;
+  window.__legacyBundlePreloaded=true;
+  if(window.requestIdleCallback){window.requestIdleCallback(preloadBundles,{timeout:800});}
+  else{setTimeout(preloadBundles,300);}
+}
+if(document.readyState!=="loading"){schedulePreload();}
+else{document.addEventListener("DOMContentLoaded",schedulePreload);}
 })();`;
 
 export default function RootLayout({ children }: Readonly<{ children: ReactNode }>) {
