@@ -2,6 +2,10 @@ import type { ReactNode } from "react";
 
 const legacyChromeObserverScript = `(function(){
 if(window.__legacyChromeObserver)return;
+var applySeq=0;
+function sheetReady(link){
+  try{return Boolean(link.sheet);}catch(e){return true;}
+}
 function apply(marker){
   var body=document.body;
   if(!body||!marker)return;
@@ -10,9 +14,26 @@ function apply(marker){
   if(bodyId){body.id=bodyId;}else{body.removeAttribute("id");}
   var stylesheet=new URL(marker.getAttribute("data-stylesheet")||"",document.baseURI).href;
   var links=document.querySelectorAll("link[data-legacy-stylesheet]");
+  var target=null;
   for(var i=0;i<links.length;i++){
-    var link=links[i];
-    link.disabled=new URL(link.getAttribute("href")||link.href,document.baseURI).href!==stylesheet;
+    if(new URL(links[i].getAttribute("href")||links[i].href,document.baseURI).href===stylesheet){target=links[i];break;}
+  }
+  var seq=++applySeq;
+  function disableOthers(){
+    if(seq!==applySeq)return;
+    var current=document.querySelectorAll("link[data-legacy-stylesheet]");
+    for(var i=0;i<current.length;i++){
+      var link=current[i];
+      link.disabled=new URL(link.getAttribute("href")||link.href,document.baseURI).href!==stylesheet;
+    }
+  }
+  if(target){target.disabled=false;}
+  // 新バンドルのCSSがパース済みになるまで旧バンドルを残す(切替瞬間の素のHTML表示を構造的に防ぐ)。
+  if(target&&!sheetReady(target)){
+    target.addEventListener("load",disableOthers,{once:true});
+    target.addEventListener("error",disableOthers,{once:true});
+  }else{
+    disableOthers();
   }
 }
 function applyLast(){
