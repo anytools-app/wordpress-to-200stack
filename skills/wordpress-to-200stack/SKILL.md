@@ -172,6 +172,7 @@ npm run wpkit -- verify --old ../_scratch/archive --new ../site/out -o ../_scrat
 
 - missing は「意図した除外」だけになるまで潰す。metaMismatches は 0 を目標
   (Yoast テンプレ変数 %%title%% 等の展開、canonical・OGP・robots の原文一致、title テンプレの二重付与に注意)
+- **SEO/sitemap 原本照合(必須)**: テンプレの `scripts/verify-seo.mjs`(`npm run verify:seo`)で、全ページの title / description / robots / canonical / og:* / twitter:* / JSON-LD をローカル原本アーカイブと突き合わせ、sitemap.xml はルート台帳との過不足0・移動URLは新URL掲載・プレビュー画面の除外+noindex を検証する。**非意図差分0が合格条件**。意図差分は `docs/seo-intentional-diffs.json` に台帳化して PASS 扱いにする(外部fetchは行わない)。実測の罠: OG/Twitterタグの部分実装・HTML entity の二重エスケープ・snapshot 経路での alias 欠落は、この照合を入れるまで気づけなかった
 - dev 用 ir(画像=現行ドメイン)のままだと brokenLinks が大量誤検知になる — 本番 ir で最終確認する
 
 ### 8. 200stack 公開
