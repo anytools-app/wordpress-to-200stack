@@ -116,14 +116,14 @@
 
 1. **外部 CDN CSS の自前化**: `vendor-css.mjs` で legacy-meta の stylesheet とテーマ CSS の外部 `@import` をフォント・画像ごと `public/vendor/` へ再帰ローカル化する。元 URL → ローカル URL は `public/vendor/manifest.json` に出力し、legacy chrome 解決時に適用する。
 2. **未使用 CSS 削減**: `audit-css.mjs` で全出力ページ × 全 CSS ルールを棚卸しする。動的 class safelist と JS / TSX 文字列走査を含むため、Coverage だけで削除しない。司令塔レビュー後に `prune-css.mjs` を `--dry-run` から実行し、`@font-face` / `@keyframes` を保護したまま unused selector のみ削除する。
-3. **bundle 統合 + minify**: `build-css-bundles.mjs` と `lib/bundle-css.mjs` で、ページ別 stylesheet 構成のユニーク集合ごとに `@import` をインライン展開・`url()` 絶対化・minify し、`public/assets/css/bundle-<hash8>.css` を prebuild で生成する。
-4. **`next/link` SPA 化 + legacy chrome 同期**: `SiteLink.tsx` は内部パスだけを `next/link` にする。`LegacyChrome.tsx` は React 19 の `<link precedence>` と hidden marker を出し、layout の MutationObserver が遷移時に body 属性と有効 bundle を同期する。
+3. **単一スコープCSS + Next import 管理(推奨最終形)**: surface CSS(index/page/archive/single等)を `:where(body.<guard>)` の子孫プレフィックスでスコープ化し(`:where` はspecificityゼロ=原文の優先度不変)、全ソースを1ファイルに統合して `src/app/legacy-generated.css` として layout で `import` する。CSSは常時全適用になり、ページ種別ごとの切替機構が不要になる。前提分析: ガードクラスがそのページ群のbodyクラスに100%含まれること、surface間の相対読み込み順に矛盾がないこと。
+4. **`next/link` SPA 化**: `SiteLink.tsx` は内部パスだけを `next/link` にする。`LegacyChrome.tsx` は hidden marker で body class/id を宣言し、layout の MutationObserver(ペイント前のマイクロタスク)が遷移時に同期する。**3の単一CSS化を先に済ませれば、stylesheetの切替・preload・precedence管理は一切不要**(バンドル切替方式は中間形として廃止。下記「罠」はその過程の教訓)。
 
 ## 実装上の罠(必ず設計に含める)
 
 - ページ JSX の先頭に head へホイストされる要素（`<link>` / `<meta>` を返すコンポーネント）を置くと Next のスクロールリセットが壊れる。`LegacyChrome` / canonical 系は可視コンテンツの後に置く。
 - React は JSX のインライン `<script>` をクライアント遷移時に実行しない（SSR 初期ロードのみ）。ペイント前同期は MutationObserver + marker 方式で行う。
-- React 19 の precedence stylesheet はアンマウント後も head に残る。複数 bundle の同時適用によるカスケード競合を防ぐため、Observer は現行 bundle 以外を常時 `disabled` にする。
+- React 19 の precedence stylesheet はアンマウント後も head に残り、複数 bundle 同時適用でカスケード競合する。さらに `link.disabled` はsheetを破棄し再有効化で再パース(WebKitは再フェッチ)が走るため、切替方式は戻り遷移で必ず崩れる。**この系の問題は単一スコープCSS化(Phase 3)で機構ごと消すのが正解**。
 - `trailingSlash: true` では `usePathname()` が末尾スラッシュ付きになる。legacy metadata とのパス照合は正規化してから行う。
 
 ## 検証ゲート
@@ -140,3 +140,9 @@
 - **分割境界オーバーラップゼロを機械検証してから移す**: 移動ルールと残置ルール(同ファイル残り+共有レガシー)の間に「同一要素×同一プロパティ系統」のペアがあると、チャンク順・詳細度の変化で勝敗が入れ替わる。長い祖先セレクタをモジュールルートに置換すると詳細度が下がり、共有CSSに負ける事故が典型(実測: カード幅-10px)
 - 上書きペアは分割しない: 残置側がページ専用なら同居、共有なら移行側を差し戻す(ルート配下単位で。半々にしない)
 - 検証は同一セッションの2ビルド比較(視覚回帰)で行う。撮影時期が違うとCMSコンテンツ差が混入する
+
+### 完了ラインと成果物(実測で確定)
+
+- **Modules化できる領域**: Reactだけが描画する共有チューム(Header/Footer等)と専用ページ(トップ等)。方式は「ルートクラスのみハッシュ化+内部は `:global()` 子孫で原文一字一句」
+- **互換層に残す領域**: 凍結HTML・CMS本文が使うクラス、surface CSS(archive/single等)の共有クラスタ。監査の結果**「移行ゼロ」が正解になるファイルもある**(実測: archive/single は候補291ルール全て残置が正解だった)。移行数をKPIにしない
+- 成果物: `docs/css-ledger.md`(所有権台帳: 移行済み/互換層と理由)と `docs/css-batchN-overlap-audit.md`(境界監査の全列挙)。完了の定義は「変更頻度の高い部分がModulesに移り、残したlegacyが台帳記録された互換層であること」(CSS Hardeningの完了定義と同じ)
