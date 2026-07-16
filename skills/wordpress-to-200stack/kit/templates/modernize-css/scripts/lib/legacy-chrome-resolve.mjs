@@ -11,17 +11,20 @@ export function normalizeLegacyPath(path) {
   return path === "/" ? path : path.replace(/\/+$/, "");
 }
 
+/** contentId 採番後の正規 URL を、原文 HTML から採取した旧 URL の chrome へ対応付ける。 */
+export function legacyMetaPath(legacyMeta, path) {
+  const normalizedPath = normalizeLegacyPath(path);
+  return legacyMeta.legacyPathAliases?.[normalizedPath] ?? normalizedPath;
+}
+
 export function vendoredHref(vendorUrls, href) {
   return vendorUrls[href] ?? vendorUrls[normalizedExternalUrl(href)] ?? href;
 }
 
-/**
- * Matches the legacy stylesheet fallback order used by both static body
- * injection and React-rendered page chrome.
- */
+/** Resolves the legacy stylesheet list used to build and verify the unified CSS. */
 export function stylesheetsFor(legacyMeta, path) {
   const normalizedPath = normalizeLegacyPath(path);
-  const exact = legacyMeta.byPath[normalizedPath]?.stylesheets;
+  const exact = legacyMeta.byPath[legacyMetaPath(legacyMeta, normalizedPath)]?.stylesheets;
   if (exact?.length) return exact;
 
   const archivePath = normalizedPath.replace(/\/page\/\d+$/, "");
@@ -33,24 +36,6 @@ export function stylesheetsFor(legacyMeta, path) {
   return surfaceStylesheets?.length ? surfaceStylesheets : (legacyMeta.stylesheetFallbacks?.default ?? []);
 }
 
-export function stylesheetKey(stylesheets, vendorUrls) {
-  return JSON.stringify(stylesheets.map((href) => vendoredHref(vendorUrls, href)));
-}
-
 export function bodyFor(legacyMeta, path) {
-  return legacyMeta.byPath[normalizeLegacyPath(path)]?.body;
-}
-
-export function resolveLegacyChrome({ legacyMeta, vendorUrls, hrefByStylesheets }, path) {
-  const normalizedPath = normalizeLegacyPath(path);
-  const stylesheets = stylesheetsFor(legacyMeta, normalizedPath);
-  const stylesheet = hrefByStylesheets[stylesheetKey(stylesheets, vendorUrls)];
-  if (!stylesheet) throw new Error(`No CSS bundle generated for ${normalizedPath}`);
-
-  const body = bodyFor(legacyMeta, normalizedPath);
-  return {
-    stylesheet,
-    bodyClass: body?.className ?? "",
-    bodyId: body?.id ?? "",
-  };
+  return legacyMeta.byPath[legacyMetaPath(legacyMeta, path)]?.body;
 }

@@ -1,50 +1,21 @@
+import type { Metadata } from "next";
 import type { ReactNode } from "react";
+
+import { InviewAnimations } from "../components/InviewAnimations";
+import { mediaUrl } from "../lib/media";
+import "./legacy-generated.css";
+import "./top.css";
+
+const siteUrl = process.env.NEXT_PUBLIC_SITE_URL;
 
 const legacyChromeObserverScript = `(function(){
 if(window.__legacyChromeObserver)return;
-var applySeq=0;
-function sheetReady(link){
-  try{return Boolean(link.sheet);}catch(e){return true;}
-}
 function apply(marker){
   var body=document.body;
   if(!body||!marker)return;
   body.className=marker.getAttribute("data-body-class")||"";
   var bodyId=marker.getAttribute("data-body-id")||"";
   if(bodyId){body.id=bodyId;}else{body.removeAttribute("id");}
-  var stylesheet=new URL(marker.getAttribute("data-stylesheet")||"",document.baseURI).href;
-  var links=document.querySelectorAll("link[data-legacy-stylesheet]");
-  var target=null;
-  for(var i=0;i<links.length;i++){
-    if(new URL(links[i].getAttribute("href")||links[i].href,document.baseURI).href===stylesheet){target=links[i];break;}
-  }
-  var seq=++applySeq;
-  function setActive(link,active){
-    // disabledはsheetを破棄し再有効化で再パース/再フェッチが走る(WebKitで顕著)。
-    // media切替はsheetを保持したまま適用だけを変えるため、切替が常に同期になる。
-    if(active){link.media="all";link.disabled=false;}
-    else{link.media="not all";}
-  }
-  function deactivateOthers(){
-    if(seq!==applySeq)return;
-    var current=document.querySelectorAll("link[data-legacy-stylesheet]");
-    for(var i=0;i<current.length;i++){
-      var link=current[i];
-      if(new URL(link.getAttribute("href")||link.href,document.baseURI).href!==stylesheet)setActive(link,false);
-    }
-  }
-  if(target){setActive(target,true);}
-  // 新バンドルのCSSが準備できるまで旧バンドルを残す(切替瞬間の未スタイル表示を構造的に防ぐ)。
-  if(target&&!sheetReady(target)){
-    var poll=setInterval(function(){
-      if(seq!==applySeq){clearInterval(poll);return;}
-      if(sheetReady(target)){clearInterval(poll);deactivateOthers();}
-    },40);
-    target.addEventListener("load",function(){clearInterval(poll);deactivateOthers();},{once:true});
-    target.addEventListener("error",function(){clearInterval(poll);deactivateOthers();},{once:true});
-  }else{
-    deactivateOthers();
-  }
 }
 function applyLast(){
   var markers=document.querySelectorAll("[data-legacy-chrome]");
@@ -62,38 +33,17 @@ var observer=new MutationObserver(function(mutations){
 window.__legacyChromeObserver=observer;
 observer.observe(document.documentElement,{childList:true,subtree:true});
 document.addEventListener("DOMContentLoaded",applyLast);
-// 全バンドルをアイドル時にpreloadし、遷移時の切替待ち(旧CSS表示の時間)をほぼゼロにする。
-function preloadBundles(){
-  fetch("/assets/css/bundles.json").then(function(r){return r.ok?r.json():null;}).then(function(manifest){
-    if(!manifest)return;
-    Object.keys(manifest).forEach(function(href){
-      if(document.querySelector('link[href="'+href+'"]'))return;
-      var link=document.createElement("link");
-      link.rel="preload";link.as="style";link.href=href;
-      document.head.appendChild(link);
-    });
-  }).catch(function(){});
-}
-// 画像ロード完了(load)を待つとユーザーの初回遷移に間に合わない実測があるため、
-// DOM構築直後のアイドル(上限800ms)で先読みする。preloadは低優先で初期描画を阻害しない。
-function schedulePreload(){
-  if(window.__legacyBundlePreloaded)return;
-  window.__legacyBundlePreloaded=true;
-  if(window.requestIdleCallback){window.requestIdleCallback(preloadBundles,{timeout:800});}
-  else{setTimeout(preloadBundles,300);}
-}
-if(document.readyState!=="loading"){schedulePreload();}
-else{document.addEventListener("DOMContentLoaded",schedulePreload);}
 })();`;
+
+export const metadata: Metadata = {
+  ...(siteUrl ? { metadataBase: new URL(siteUrl) } : {}),
+  // 原文の title をそのまま出すため template は付けない(各ページが完全な title を持つ)
+  title: "TODO(案件): サイトタイトル",
+};
 
 export default function RootLayout({ children }: Readonly<{ children: ReactNode }>) {
   return <html lang="ja"><head>
+    <link rel="icon" href={mediaUrl("/wp-content/themes/YOUR-THEME/favicon.png")} />
     <script dangerouslySetInnerHTML={{ __html: legacyChromeObserverScript }} />
-  </head><body suppressHydrationWarning>{children}</body></html>;
+  </head><body suppressHydrationWarning><InviewAnimations />{children}</body></html>;
 }
-
-// 各ページでは LegacyChrome を可視コンテンツの後に置く。先頭に置くと、head へ
-// ホイストされる link/meta が Next のスクロールリセットを壊すことがある。
-// export default async function Page() {
-//   return <><main>{/* visible content */}</main><LegacyChrome path="/" /></>;
-// }
