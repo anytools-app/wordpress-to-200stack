@@ -153,6 +153,12 @@ async function capture({ label, outDir, sample }) {
     browser = await chromium.launch({ headless: true });
     for (const [name, viewport] of Object.entries(viewports)) {
       const context = await browser.newContext({ viewport, deviceScaleFactor: 1, reducedMotion: "reduce" });
+      // 検証の不変条件: 外部への実フェッチ禁止(移行元サーバーの転送量保護)。
+      await context.route("**/*", (route) => {
+        const url = new URL(route.request().url());
+        if (url.hostname === "127.0.0.1" || url.hostname === "localhost") return route.continue();
+        return route.abort();
+      });
       await context.addInitScript(() => {
         for (const media of document.querySelectorAll("video, audio")) media.pause();
         window.requestAnimationFrame = (callback) => setTimeout(() => callback(performance.now()), 16);
