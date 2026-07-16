@@ -1,6 +1,6 @@
 import Link from "next/link";
 
-import { ContentRepository } from "../lib/repository";
+import { ContentRepository } from "@/lib/repository";
 
 export default async function HomePage() {
   const repository = await ContentRepository.load();

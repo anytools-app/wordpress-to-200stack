@@ -139,3 +139,9 @@ archive のスクショ・保存 HTML を「凍結された仕様書」として
 - 既存(移行)記事のURL・出力は不変。sitemap/アーカイブ一覧へ自動掲載
 
 これに伴い、サイトのビルド入力は「IRスナップショット(リポジトリにコミット、~5MB)+ビルド時のmicroCMS API取得」を標準構成とする(CI/200stackに _scratch は無い前提。案件の export:build-snapshot 参照)。
+
+
+## コーディング標準(テンプレートのデフォルト)
+
+- **import エイリアス**: `tsconfig.json` の `paths` で `@/* → src/*` を定義し、親ディレクトリ跨ぎの相対 import(`../../lib/...`)は書かない(`@/lib/...`)。同一ディレクトリの `./Foo` と CSS Modules の `./X.module.css` は相対のまま
+- **Biome**: フォーマッタ/リンタは Biome(`biome.json` 同梱: 2スペース・lineWidth 120・organizeImports)。`npm run format` / `npm run lint` を標準スクリプトとする。移行コードも生成物を除き全て format 済みで納品する

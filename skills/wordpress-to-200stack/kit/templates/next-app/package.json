@@ -8,7 +8,10 @@
     "prebuild": "npm run build:data",
     "build": "next build",
     "start": "next start",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "format": "biome format --write .",
+    "lint": "biome check .",
+    "lint:fix": "biome check --write ."
   },
   "dependencies": {
     "next": "^16.0.0",
@@ -25,6 +28,7 @@
     "playwright": "^1.61.1",
     "pngjs": "^7.0.0",
     "tsx": "^4.0.0",
-    "typescript": "^5.0.0"
+    "typescript": "^5.0.0",
+    "@biomejs/biome": "^2.4.0"
   }
 }

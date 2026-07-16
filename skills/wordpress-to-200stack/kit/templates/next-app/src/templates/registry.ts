@@ -1,6 +1,6 @@
 import type { ComponentType } from "react";
 
-import type { SearchIndexRegistry } from "../lib/search-index";
+import type { SearchIndexRegistry } from "@/lib/search-index";
 import { ArticleTemplate, type DocumentTemplateProps } from "./ArticleTemplate";
 import { NotImplemented } from "./NotImplemented";
 

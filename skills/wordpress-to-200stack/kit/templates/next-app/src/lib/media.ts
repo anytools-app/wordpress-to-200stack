@@ -1,4 +1,4 @@
-import rawManifest from "../data/media-manifest.json";
+import rawManifest from "@/data/media-manifest.json";
 
 type LocalMediaEntry = { local: string };
 type MediaUrlOptions = { w?: number };

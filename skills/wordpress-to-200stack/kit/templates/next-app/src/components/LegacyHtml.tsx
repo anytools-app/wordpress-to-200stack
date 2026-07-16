@@ -1,4 +1,4 @@
-import { sanitizeLegacyHtml } from "../lib/legacy-html";
+import { sanitizeLegacyHtml } from "@/lib/legacy-html";
 
 export function LegacyHtml({ html, iframeHosts }: { html: string; iframeHosts?: readonly string[] }) {
   const safeHtml = sanitizeLegacyHtml(html, iframeHosts);

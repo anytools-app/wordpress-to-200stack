@@ -1,8 +1,8 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 
-import { ContentRepository } from "../../lib/repository";
-import { templateFor } from "../../templates/registry";
+import { ContentRepository } from "@/lib/repository";
+import { templateFor } from "@/templates/registry";
 
 type PageProps = { params: Promise<{ path: string[] }> };
 

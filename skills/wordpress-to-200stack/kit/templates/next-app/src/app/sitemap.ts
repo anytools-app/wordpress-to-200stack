@@ -1,6 +1,6 @@
 import type { MetadataRoute } from "next";
 
-import { ContentRepository } from "../lib/repository";
+import { ContentRepository } from "@/lib/repository";
 
 export const dynamic = "force-static";
 
