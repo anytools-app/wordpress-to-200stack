@@ -127,6 +127,7 @@ npm run wpkit -- import --ir ../_scratch/ir --dry-run   # oversized 0 を確認 
 ### 6. Next.js(テンプレ実装は delegate へ)
 
 - `cp -R kit/templates/next-app <案件>/site` → `WPKIT_DATA_SOURCE=ir` で microCMS 未契約でもビルド可
+- **microCMS ドラフトプレビュー(`/preview/` CSR シェル)はデフォルト成果物**: 読み取り専用 GET キー必須・実画面と同一テンプレ描画・draftKey 任意・noindex+sitemap 除外。仕様は `design.md` の「microCMS ドラフトプレビュー」節
 - **デザイン検証中は dev 用 config(mediaHost=現行ドメイン)で parse した ir-dev を使い、
   本番切替時に本 config で parse し直す**(media transform 前でも画像が見える)
 - テンプレ実装指示書は `templates.md` の雛形を使用。**指示書に必ず入れる規律**(実案件で確立):

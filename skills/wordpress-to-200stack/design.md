@@ -113,6 +113,7 @@ analyze が config の雛形(フィールド定義込み)を自動生成し、�
 - formrun 接続フォーム(入力→確認→送信の状態機械。フォーム台帳から生成)
 - 検索インデックス生成(一覧の絞り込み用軽量 JSON)
 - sitemap / robots / メタ(Yoast 由来)自動出力
+- microCMS ドラフトプレビュー(`/preview/` CSR シェル。読み取り専用キー+実画面と同一テンプレで描画。後述)
 - verify と対になる data-testid 規約
 
 案件固有で書くのは **CSS とテンプレコンポーネントの見た目だけ**。ここは AI 委任(Codex)+人間レビュー。
@@ -140,6 +141,18 @@ archive のスクショ・保存 HTML を「凍結された仕様書」として
 
 これに伴い、サイトのビルド入力は「IRスナップショット(リポジトリにコミット、~5MB)+ビルド時のmicroCMS API取得」を標準構成とする(CI/200stackに _scratch は無い前提。案件の export:build-snapshot 参照)。
 
+
+## microCMS ドラフトプレビュー(デフォルト実装、2026-07 確定)
+
+静的エクスポート構成でも編集者が下書きを確認できるよう、`/preview/` を CSR シェルとしてデフォルトで実装する。
+
+- **ルート**: `/preview/?api=<endpoint>&id={CONTENT_ID}&draftKey={DRAFT_KEY}`。静的ルート1枚(`robots: noindex`)+ Suspense 配下の `"use client"` コンポーネントが useSearchParams で受けてコンテンツ API を直接 GET する
+- **draftKey は任意**: 下書きは microCMS がコンテンツ単位の draftKey を自動付与、公開中コンテンツは draftKey なしで公開データを表示する(必須にしない — 実測で編集者が公開後の画面確認にも使う)
+- **API キー**: `NEXT_PUBLIC_MICROCMS_SERVICE_DOMAIN` / `NEXT_PUBLIC_MICROCMS_PREVIEW_KEY` の2環境変数。`NEXT_PUBLIC_*` はブラウザへ露出するため、プレビューキーは **GET のみ許可の読み取り専用キー必須**(入稿用 Management キーの流用禁止)
+- **実画面と同一コード**: レコード→ドキュメント合成(hydration)とテンプレ props 生成をサーバ/クライアント共通モジュールへ切り出し、SSG とプレビュー CSR が**同じ関数・同じ templates/registry** を通る構成にする。プレビュー専用の描画分岐を作らない(分岐した瞬間に「プレビューでは崩れない」保証が消える)
+- **関連コンテンツ**(サイドバー・関連記事・relation)は公開 API からベストエフォート取得し、失敗しても本体は空の関連データで描画する(API 単位の関連マップを定義)
+- **SEO ゲートとの接続**: `/preview/` の noindex と sitemap 除外は `verify:seo` の検証項目に含める
+- **管理画面設定**: microCMS 各 API の「画面プレビュー」へ上記 URL 形式を設定(API ごとに `api=` のみ変更)。環境変数と合わせて案件 docs に `microcms-setup.md` として手順を残し、設定はユーザー(管理画面オーナー)へ依頼する
 
 ## コーディング標準(テンプレートのデフォルト)
 
