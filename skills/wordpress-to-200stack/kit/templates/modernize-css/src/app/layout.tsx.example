@@ -19,21 +19,31 @@ function apply(marker){
     if(new URL(links[i].getAttribute("href")||links[i].href,document.baseURI).href===stylesheet){target=links[i];break;}
   }
   var seq=++applySeq;
-  function disableOthers(){
+  function setActive(link,active){
+    // disabledはsheetを破棄し再有効化で再パース/再フェッチが走る(WebKitで顕著)。
+    // media切替はsheetを保持したまま適用だけを変えるため、切替が常に同期になる。
+    if(active){link.media="all";link.disabled=false;}
+    else{link.media="not all";}
+  }
+  function deactivateOthers(){
     if(seq!==applySeq)return;
     var current=document.querySelectorAll("link[data-legacy-stylesheet]");
     for(var i=0;i<current.length;i++){
       var link=current[i];
-      link.disabled=new URL(link.getAttribute("href")||link.href,document.baseURI).href!==stylesheet;
+      if(new URL(link.getAttribute("href")||link.href,document.baseURI).href!==stylesheet)setActive(link,false);
     }
   }
-  if(target){target.disabled=false;}
-  // 新バンドルのCSSがパース済みになるまで旧バンドルを残す(切替瞬間の素のHTML表示を構造的に防ぐ)。
+  if(target){setActive(target,true);}
+  // 新バンドルのCSSが準備できるまで旧バンドルを残す(切替瞬間の未スタイル表示を構造的に防ぐ)。
   if(target&&!sheetReady(target)){
-    target.addEventListener("load",disableOthers,{once:true});
-    target.addEventListener("error",disableOthers,{once:true});
+    var poll=setInterval(function(){
+      if(seq!==applySeq){clearInterval(poll);return;}
+      if(sheetReady(target)){clearInterval(poll);deactivateOthers();}
+    },40);
+    target.addEventListener("load",function(){clearInterval(poll);deactivateOthers();},{once:true});
+    target.addEventListener("error",function(){clearInterval(poll);deactivateOthers();},{once:true});
   }else{
-    disableOthers();
+    deactivateOthers();
   }
 }
 function applyLast(){
