@@ -2,11 +2,20 @@ import { readFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 
 export type LegacyDocument = {
+  /** IR 台帳ではなく microCMS のみのレコードから生成した文書。 */
+  synthetic?: true;
   source: { wpId: number; postType: string; status: string; modifiedGmt?: string };
   api: string;
   kind?: string;
   contentId: string;
-  route: { legacyUrl: string; path: string; segments: string[]; trailingSlash: boolean };
+  route: {
+    legacyUrl: string;
+    path: string;
+    segments: string[];
+    trailingSlash: boolean;
+    /** contentId 採番により移動したページの、リダイレクト元となる旧パス。 */
+    legacyRedirectFrom?: string;
+  };
   content: { title: string; legacyBodyHtml: string; excerpt: string; publishedAt: string };
   seo?: { title?: string; description?: string; noindex?: boolean };
   taxonomies: Array<{ taxonomy: string; slug: string; name: string }>;

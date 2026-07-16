@@ -128,3 +128,14 @@ archive のスクショ・保存 HTML を「凍結された仕様書」として
 6. `wpkit verify` → 差分トリアージ → 修正ループ(ゲート4)
 7. 切替チェックリスト(DNS・最終差分移行・監視)
 
+
+## 新規記事のデフォルト対応(2026-07 確定)
+
+移行後に microCMS だけで作成された新規記事は、**デフォルトで描画対象**とする(IR台帳に無いレコードの合成ハイドレーション)。テンプレート `next-app/src/lib/repository.ts` に実装済み:
+
+- contentId = record.id(記事作成時にIDへスラッグを入力すればそのままURL、無指定なら自動発行ID)
+- ルートは「そのAPIの既存ルートの最頻第1セグメント + /{contentId}」(people は kind で /staff | /vendors)。既存ルートと衝突したら既存優先でスキップ
+- 画像フィールドは {url,width,height} → URL文字列へ正規化(IRモードと同型)。参照フィールドは relation として復元
+- 既存(移行)記事のURL・出力は不変。sitemap/アーカイブ一覧へ自動掲載
+
+これに伴い、サイトのビルド入力は「IRスナップショット(リポジトリにコミット、~5MB)+ビルド時のmicroCMS API取得」を標準構成とする(CI/200stackに _scratch は無い前提。案件の export:build-snapshot 参照)。
