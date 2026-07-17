@@ -155,7 +155,7 @@
 - 委任側検証の一式(全て機械化して監査文書に全列挙): 原文AST等価(移動ルール全件)、全selector branchにローカルルート必須(グローバル漏出ゼロ)、実DOMベースの勝者監査、`build:css` 冪等(SHA-1一致)、class-map単体検証
 - **class-mapが効かない経路に注意(実測で回帰)**: class-mapはHTML文字列経路だけに効き、**JSX `className` 直書きには効かない**。移動rootクラスとclass-map登録クラスの全てについて src 全 tsx の直書きを grep し、ヒットは owner Module を import して module class 使用へ書き換える(所有は1つのまま)。その要素を別ownerの補正ルールが `:global(.legacy-class)` で参照している場合は **module classとレガシークラスを併記**し(import順=元のstylesheet順で後勝ちを保存)、片方だけにしない。条件分岐(SOLD表示等)でしか出ないDOMは視覚回帰URL集合にも代表を含める
 - **グローバル補正の移動は実DOM到達点を先に確認(実測で回帰)**: layout直importのCSS(トップ用補正等)は全ページに効いている。その補正を特定ownerルート配下へ移すと、ルート外の到達点(全ページ共通のFooter/Header、トップページ、条件分岐DOM)で効かなくなる。到達点を全て覆うownerが無ければ残置する。静的監査のURL集合外で起きるため、**司令塔ピクセルゲートのURL集合は「各owner代表+全ページ共通要素+条件分岐DOM」まで広げる**
-- **完了ライン**: surface CSSが全て0 byteになり、body-class guard(`:where(body.<guard>)`)が撤去できる。互換層に残るのはグローバル基盤(bundle/common/style等の全ページ共通CSS)のみ
+- **完了ライン**: surface CSSが全て0 byteになり、body-class guard(`:where(body.<guard>)`)が撤去できる。互換層に残るのはグローバル基盤(bundle/common/style等の全ページ共通CSS)のみ。guard 0到達後は、bodyクラス依存CSSゼロを機械確認(`body.`/`body#` セレクタgrep+JS参照grep)した上で、**bodyクラス同期などの実行時互換機構(head Observer・suppressHydrationWarning)も撤去**する — ここまで来て初めて「普通のNext.js」と実行時の差が消える
 
 ### 成果物
 
