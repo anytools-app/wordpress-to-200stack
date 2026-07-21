@@ -65,12 +65,29 @@ wp-static-kit/                     # 独立リポジトリ(npm workspace / TypeS
 
 ### wpkit schema gen / wpkit import
 - schema gen: mapping.config から microCMS の API スキーマ JSON を生成(管理画面のインポート機能で投入)
+  - 管理画面が受理する正式エクスポート形式で生成する。`customFields` は決定的な過去日時の `createdAt` / `updatedAt` を持ち、各サブフィールドに sha256 先頭10桁の `idValue` を付け、`position` は fieldId でなくその `idValue` 配列にする
+  - API 側の単一カスタムフィールドは `customFieldCreatedAt`、repeater は `customFieldCreatedAtList` で対応する `customFields[].createdAt` を参照する。boolean の初期値は `booleanInitialValue`、select は `selectInitialValue` を使う
+  - `requiredFields` に指定した共通フィールド・通常フィールド・repeater / カスタムフィールド等は、生成後の API フィールドで `required: true` にする
+  - `fields` / `repeaters` / `relations` / `groups` / `taxonomyFields` の `description` を microCMS の説明文へ反映する。`richText` は `richEditorV2` として生成し、共通本文 `legacyBodyHtml` にも使用する
+  - relation の表示名は `label`、単一カスタムフィールドは `groups` でフラットな `fieldIds` / `relationIds` を束ねる。未定義参照・fieldId 重複・複数グループ所属は config 検証で拒否する
+  - `taxonomyFields` は WordPress term を `value=term名`、`id=slugのsha256先頭10桁` の複数選択肢として記事 API 内に生成する。既存の IR 凍結用 `taxonomies` は併存する
+  - `seoFields: "none"` は `seoTitle` / `seoDescription` を生成せず、`noindex` は常に残す
 - import: コンテンツ API で冪等入稿
   - contentId = `{type}-{wp_id}` の PUT upsert、payloadChecksum 一致は skip
   - レート制御(WRITE 5回/秒、実効 4/秒)+ 429 指数バックオフ
-  - 2パス目で relation を PATCH
+  - 非参照グループ値は `{ fieldId, ...サブフィールド }` へネストし、内包 relation は2パス目でグループ全体を PATCH する
+  - boolean フィールドの WordPress 文字列値は `"1"` / `"true"` を `true`、`"0"` / `"false"` / 空文字を `false` に変換する。サブフィールドがなく `{ fieldId }` だけになる空グループは create ペイロードから除外する
+  - `taxonomyFields` は `document.taxonomies` から該当 taxonomy の term 名配列を入稿する
+  - `seoFields: "none"` は SEO テキストをペイロードから除外する
+  - 原文公開日は予約フィールド `publishedAt` へ ISO8601 UTC で入稿し、不正日時は送らない。旧共通フィールド `legacyPath` / `wpId` / `publishedAtLegacy` は生成・入稿しない
   - `--dry-run` / `--only <type>` / `--source-id <id>`
   - 入稿後に GET で全件突き合わせ(件数・checksum)
+
+microCMS の前提:
+- Content 管理 API の POST / PUT / PATCH は `publishedAt` を ISO8601 で指定でき、移行元の公開日時を保持できる
+- カスタムフィールドはコンテンツ参照を内包できるが、カスタムフィールド自体のネストはできない。値は `{ fieldId, ...サブフィールド }`、内包参照は contentId 文字列で書き込む
+- 単一選択 select も配列で返るため、描画側は string / 配列の両方を扱う。選択肢なしの select は操作できないため、`options` を必ず指定する
+- WordPress タクソノミーは専用 API を増やさず、記事内の複数選択フィールドで表現できる。これは microCMS の API 数上限対策になる
 
 ### wpkit archive <url> / wpkit verify <old> <new>
 - archive: sitemap+リンククロールで全 URL 収集 → HTML・ヘッダー・canonical・スクショ(desktop/mobile)保存。
@@ -86,11 +103,11 @@ export default defineMigration({
   site: { origin: "https://www.example.jp", mediaHost: "https://media.example.jp" },
   exclude: { postTypes: ["archived"], statuses: ["draft", "private"] },
   apis: {
-    items: {
-      from: "item",
+    articles: {
+      from: "post",
       fields: { /* meta key → フィールド定義。analyze の出力から半自動生成 */ },
       repeaters: { images: ["image"], points: ["feature_img", "feature_line", "feature_text"] },
-      relations: { relatedItem: { key: "item-data", to: "people" } },
+      relations: { author: { key: "author", to: "people" } },
     },
     // ...
     people: { from: ["staff", "vendors"], kindField: "kind" },

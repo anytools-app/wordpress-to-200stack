@@ -4,7 +4,7 @@ import { join } from "node:path";
 
 import pLimit from "p-limit";
 
-import type { ApiDef, FieldDef, MigrationConfig } from "../config.js";
+import type { ApiDef, FieldDef, GroupDef, MigrationConfig } from "../config.js";
 import type { LegacyDocument } from "../parse/index.js";
 
 type FetchLike = typeof fetch;
@@ -58,13 +58,37 @@ class WriteRateLimiter {
   }
 }
 
+function isValidUtcDate(year: string, month: string, day: string, hour: string, minute: string, second: string): boolean {
+  const date = new Date(`${year}-${month}-${day}T${hour}:${minute}:${second}.000Z`);
+  return !Number.isNaN(date.getTime())
+    && date.getUTCFullYear() === Number(year)
+    && date.getUTCMonth() + 1 === Number(month)
+    && date.getUTCDate() === Number(day)
+    && date.getUTCHours() === Number(hour)
+    && date.getUTCMinutes() === Number(minute)
+    && date.getUTCSeconds() === Number(second);
+}
+
+function publishedAtIso(value: string): string | undefined {
+  const dateTime = value.trim();
+  const isoMatch = dateTime.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d+)?Z$/);
+  if (isoMatch) {
+    const [, year, month, day, hour, minute, second] = isoMatch;
+    return isValidUtcDate(year!, month!, day!, hour!, minute!, second!) ? dateTime : undefined;
+  }
+  const wpMatch = dateTime.match(/^(\d{4})-(\d{2})-(\d{2}) (\d{2}):(\d{2}):(\d{2})$/);
+  if (!wpMatch) return undefined;
+  const [, year, month, day, hour, minute, second] = wpMatch;
+  if (!isValidUtcDate(year!, month!, day!, hour!, minute!, second!)) return undefined;
+  return `${year}-${month}-${day}T${hour}:${minute}:${second}.000Z`;
+}
+
 function documentPayload(document: LegacyDocument): Record<string, unknown> {
+  const publishedAt = publishedAtIso(document.content.publishedAt);
   return {
     title: document.content.title,
-    legacyPath: document.route.path,
     ...(document.content.legacyBodyHtml ? { legacyBodyHtml: document.content.legacyBodyHtml } : {}),
-    wpId: document.source.wpId,
-    publishedAtLegacy: document.content.publishedAt,
+    ...(publishedAt ? { publishedAt } : {}),
     seoTitle: document.seo?.title ?? "",
     seoDescription: document.seo?.description ?? "",
     noindex: document.seo?.noindex ?? false,
@@ -161,11 +185,43 @@ function stripNullValues(payload: Record<string, unknown>): Record<string, unkno
   return cleaned;
 }
 
+function groupNonRelationPayload(document: LegacyDocument, group: GroupDef, normalizedPayload: Record<string, unknown>): Record<string, unknown> {
+  const nested = normalizedPayload[group.fieldId];
+  const source = nested && typeof nested === "object" && !Array.isArray(nested)
+    ? nested as Record<string, unknown>
+    : normalizedPayload;
+  return stripNullValues({
+    fieldId: group.fieldId,
+    ...Object.fromEntries(group.fieldIds
+      .filter((fieldId) => Object.hasOwn(document.fields, fieldId) && source[fieldId] !== "")
+      .map((fieldId) => [fieldId, source[fieldId]])),
+  });
+}
+
+function nestGroupPayload(document: LegacyDocument, payload: Record<string, unknown>, definition: ApiDef): Record<string, unknown> {
+  if (!definition.groups?.length) return payload;
+  const nested = { ...payload };
+  for (const group of definition.groups) {
+    const value = groupNonRelationPayload(document, group, payload);
+    // サブフィールドが1つも無い { fieldId } のみの空グループは送らない(受理未検証の空値を避ける)。
+    if (Object.keys(value).length > 1) nested[group.fieldId] = value;
+    else delete nested[group.fieldId];
+    for (const fieldId of group.fieldIds) delete nested[fieldId];
+    for (const relationId of group.relationIds ?? []) delete nested[relationId];
+  }
+  return nested;
+}
+
 function normalizePayload(document: LegacyDocument, payload: Record<string, unknown>, config: MigrationConfig | undefined, warnings: ImportWarning[], mediaMap?: MediaMap): Record<string, unknown> {
   const definition = config?.apis[document.api];
-  const bodyMappedPayload = mediaMap && "legacyBodyHtml" in payload
-    ? { ...payload, legacyBodyHtml: rewriteBodyMedia(document, payload.legacyBodyHtml, mediaMap, warnings) }
-    : payload;
+  const configuredPayload = { ...payload };
+  if (definition?.seoFields === "none") {
+    delete configuredPayload.seoTitle;
+    delete configuredPayload.seoDescription;
+  }
+  const bodyMappedPayload = mediaMap && "legacyBodyHtml" in configuredPayload
+    ? { ...configuredPayload, legacyBodyHtml: rewriteBodyMedia(document, configuredPayload.legacyBodyHtml, mediaMap, warnings) }
+    : configuredPayload;
   // --config is opt-in so existing import behavior remains unchanged.
   if (!definition) return stripNullValues(bodyMappedPayload);
   const fields = fieldsForApi(definition);
@@ -173,7 +229,12 @@ function normalizePayload(document: LegacyDocument, payload: Record<string, unkn
   const normalized: Record<string, unknown> = {};
   for (const [fieldId, value] of Object.entries(imageMappedPayload)) {
     const field = fields.get(fieldId);
-    // Empty strings are unset values in microCMS, regardless of field type.
+    // WP メタの真偽値は "0"/"1" 文字列で来る。microCMS boolean へ変換する。
+    if (field?.type === "boolean" && typeof value === "string") {
+      if (value === "1" || value === "true") { normalized[fieldId] = true; continue; }
+      if (value === "0" || value === "false" || value === "") { normalized[fieldId] = false; continue; }
+    }
+    // Empty strings are unset values except for boolean fields, where WP's empty meta means false.
     // A number-field empty string is also reported because it is a rejected value.
     if (value === "") {
       if (field?.type === "number") warnings.push({ api: document.api, contentId: document.contentId, fieldId, value, reason: "invalidNumber" });
@@ -199,7 +260,12 @@ function normalizePayload(document: LegacyDocument, payload: Record<string, unkn
     }
     normalized[fieldId] = value;
   }
-  return stripNullValues(normalized);
+  for (const taxonomyField of definition.taxonomyFields ?? []) {
+    normalized[taxonomyField.fieldId] = document.taxonomies
+      .filter((term) => term.taxonomy === taxonomyField.taxonomy)
+      .map((term) => term.name);
+  }
+  return nestGroupPayload(document, stripNullValues(normalized), definition);
 }
 
 async function readDocuments(irDir: string): Promise<LegacyDocument[]> {
@@ -272,7 +338,7 @@ function baseUrl(serviceDomain: string): string {
   return `https://${serviceDomain}.microcms.io/api/v1`;
 }
 
-export { documentPayload };
+export { documentPayload, publishedAtIso };
 export async function importDocuments(options: ImportOptions): Promise<ImportResult> {
   const serviceDomain = options.serviceDomain ?? process.env.MICROCMS_SERVICE_DOMAIN;
   const apiKey = options.apiKey ?? process.env.MICROCMS_API_KEY;
@@ -294,8 +360,10 @@ export async function importDocuments(options: ImportOptions): Promise<ImportRes
   };
   const result: ImportResult = { total: documents.length, wouldUpload: 0, wouldAutoAssign: 0, autoAssigned: 0, provisional: documents.filter((document) => document.contentIdProvisional).length, uploaded: 0, skipped: 0, oversized: 0, dryRun: Boolean(options.dryRun), failures: [], warnings: [], totals: [] };
   const candidates: Array<{ document: LegacyDocument; payload: Record<string, unknown>; checksum: string }> = [];
+  const normalizedPayloads = new Map<LegacyDocument, Record<string, unknown>>();
   for (const document of documents) {
     const payload = normalizePayload(document, documentPayload(document), options.config, result.warnings, mediaMap);
+    normalizedPayloads.set(document, payload);
     // Without --media-map retain the durable IR checksum exactly. With it, the
     // map changes the write payload, so use that payload as the idempotency key
     // and do not let an earlier text-field import suppress the media migration.
@@ -350,18 +418,34 @@ export async function importDocuments(options: ImportOptions): Promise<ImportRes
     if (!state[document.contentId]) continue;
     const assignedDocumentId = document.contentIdProvisional ? contentIdMap[document.contentId] : document.contentId;
     if (!assignedDocumentId) continue;
-    const relationValues = new Map<string, string>();
+    const relationValues: Record<string, unknown> = {};
+    const seenRelationIds = new Set<string>();
+    const definition = options.config?.apis[document.api];
+    const relationGroups = new Map((definition?.groups ?? []).flatMap((group) => (group.relationIds ?? []).map((relationId) => [relationId, group] as const)));
     for (const relation of document.relations) {
-      if (!relation.targetContentId || relationValues.has(relation.fieldId)) continue;
+      if (!relation.targetContentId || seenRelationIds.has(relation.fieldId)) continue;
       const targetIsProvisional = provisionalContentIds.has(relation.targetContentId);
       const mappedTargetId = contentIdMap[relation.targetContentId];
       if ((targetIsProvisional && !mappedTargetId) || (selectedContentIds.has(relation.targetContentId) && !state[relation.targetContentId])) continue;
-      relationValues.set(relation.fieldId, mappedTargetId ?? relation.targetContentId);
+      seenRelationIds.add(relation.fieldId);
+      const targetContentId = mappedTargetId ?? relation.targetContentId;
+      const group = relationGroups.get(relation.fieldId);
+      if (!group) {
+        relationValues[relation.fieldId] = targetContentId;
+        continue;
+      }
+      const normalizedPayload = normalizedPayloads.get(document) ?? {};
+      const groupPayload = relationValues[group.fieldId];
+      relationValues[group.fieldId] = {
+        ...groupNonRelationPayload(document, group, normalizedPayload),
+        ...(groupPayload && typeof groupPayload === "object" && !Array.isArray(groupPayload) ? groupPayload as Record<string, unknown> : {}),
+        [relation.fieldId]: targetContentId,
+      };
     }
-    if (relationValues.size === 0) continue;
+    if (Object.keys(relationValues).length === 0) continue;
     const url = `${root}/${encodeURIComponent(document.api)}/${encodeURIComponent(assignedDocumentId)}`;
     try {
-      const response = await requestWithRetry(fetchImpl, limiter, url, { method: "PATCH", headers, body: JSON.stringify(Object.fromEntries(relationValues)) }, sleep);
+      const response = await requestWithRetry(fetchImpl, limiter, url, { method: "PATCH", headers, body: JSON.stringify(relationValues) }, sleep);
       if (!response.ok) throw new Error(`HTTP ${response.status}: ${(await response.text().catch(() => "")).slice(0, 300)}`);
     } catch (error: unknown) { result.failures.push({ api: document.api, contentId: document.contentId, phase: "relation", message: error instanceof Error ? error.message : String(error) }); }
   }

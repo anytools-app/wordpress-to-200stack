@@ -4,7 +4,7 @@ import { join } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import { importDocuments } from "../src/microcms/import.js";
+import { documentPayload, importDocuments, publishedAtIso } from "../src/microcms/import.js";
 import { defineMigration, type MigrationConfig } from "../src/config.js";
 import type { LegacyDocument } from "../src/parse/index.js";
 
@@ -29,8 +29,46 @@ const normalizationConfig: MigrationConfig = defineMigration({
   wxr: "/tmp/test.xml", site: { origin: "https://old.test", mediaHost: "https://media.test" },
   apis: { cars: { from: ["staff", "vendors"], kindField: "kind", featuredImage: true, fields: [{ metaKey: "price", fieldId: "price", type: "number" }, { metaKey: "label", fieldId: "label", type: "string" }, { metaKey: "image", fieldId: "vehicleImage", type: "image" }], repeaters: [{ fieldId: "gallery", columns: [{ metaKey: "image", fieldId: "image", type: "image" }] }] } },
 });
+const groupConfig: MigrationConfig = defineMigration({
+  wxr: "/tmp/test.xml", site: { origin: "https://old.test", mediaHost: "https://media.test" },
+  apis: {
+    cars: {
+      from: "car",
+      fields: [
+        { metaKey: "profile_visible", fieldId: "visible", type: "boolean" },
+        { metaKey: "profile_comment", fieldId: "comment", type: "text" },
+        { metaKey: "profile_note", fieldId: "note", type: "text" },
+      ],
+      relations: [{ metaKey: "profile_author", fieldId: "author", toApi: "people" }],
+      groups: [{ fieldId: "profile", fieldIds: ["visible", "comment", "note"], relationIds: ["author"] }],
+    },
+    people: { from: "people", fields: [] },
+  },
+});
+const taxonomyConfig: MigrationConfig = defineMigration({
+  wxr: "/tmp/test.xml", site: { origin: "https://old.test", mediaHost: "https://media.test" },
+  apis: { cars: {
+    from: "car", fields: [],
+    taxonomyFields: [
+      { taxonomy: "post_category", fieldId: "categories", label: "カテゴリ", terms: [{ slug: "news", name: "ニュース" }] },
+      { taxonomy: "future_category", fieldId: "futureCategories", label: "将来用カテゴリ", terms: [] },
+    ],
+  } },
+});
 
 describe("wpkit import", () => {
+  it("sends the reserved publishedAt field in UTC and omits retired common fields", () => {
+    const payload = documentPayload(doc({ content: { title: "Car", legacyBodyHtml: "<p>body</p>", excerpt: "", publishedAt: "2026-01-01 00:00:00" } }));
+    expect(payload).toMatchObject({ publishedAt: "2026-01-01T00:00:00.000Z" });
+    expect(payload).not.toHaveProperty("legacyPath");
+    expect(payload).not.toHaveProperty("wpId");
+    expect(payload).not.toHaveProperty("publishedAtLegacy");
+    expect(publishedAtIso("2026-01-01T00:00:00.000Z")).toBe("2026-01-01T00:00:00.000Z");
+    expect(publishedAtIso("2026-02-30 00:00:00")).toBeUndefined();
+    expect(publishedAtIso("2026-01-01 24:00:00")).toBeUndefined();
+    expect(documentPayload(doc({ content: { title: "Car", legacyBodyHtml: "", excerpt: "", publishedAt: "" } }))).not.toHaveProperty("publishedAt");
+  });
+
   it("uses PUT payloads, repeater field IDs, a second relation PATCH, and global rate waits", async () => {
     const ir = await writeIr([doc(), doc({ source: { wpId: 11, postType: "car", status: "publish" }, contentId: "cars-11", relations: [] }), doc({ source: { wpId: 20, postType: "page", status: "publish" }, api: "pages", contentId: "pages-20", relations: [] })]);
     const calls: Array<{ method: string; url: string; body?: Record<string, unknown> }> = []; const sleeps: number[] = [];
@@ -43,6 +81,97 @@ describe("wpkit import", () => {
     expect(calls.find((call) => call.method === "PATCH")?.body).toEqual({ related: "pages-20" });
     expect(calls.findIndex((call) => call.method === "PATCH")).toBeGreaterThan(calls.map((call) => call.method).lastIndexOf("PUT"));
     expect(sleeps.some((milliseconds) => milliseconds >= 250)).toBe(true);
+  });
+
+  it("nests grouped fields during create and PATCHes grouped relations with the full custom-field object", async () => {
+    const ir = await writeIr([
+      doc({
+        fields: { visible: false, comment: "確認済み", note: "" },
+        repeaters: {},
+        relations: [{ fieldId: "author", toApi: "people", targetWpId: 20, targetContentId: "people-20" }],
+      }),
+      doc({
+        source: { wpId: 20, postType: "people", status: "publish" }, api: "people", contentId: "people-20",
+        fields: {}, repeaters: {}, relations: [],
+      }),
+    ]);
+    const calls: Array<{ method: string; url: string; body?: Record<string, unknown> }> = [];
+    const result = await importDocuments({ irDir: ir, config: groupConfig, serviceDomain: "service", apiKey: "key", sleep: async () => undefined, fetchImpl: async (url, init) => {
+      calls.push({ method: init?.method ?? "GET", url: String(url), ...(init?.body ? { body: JSON.parse(String(init.body)) as Record<string, unknown> } : {}) });
+      return init?.method === "GET" ? response({ totalCount: 1 }) : response();
+    } });
+    const create = calls.find((call) => call.method === "PUT" && call.url.endsWith("/cars/cars-10"))!;
+    expect(create.body).not.toHaveProperty("visible");
+    expect(create.body).not.toHaveProperty("comment");
+    expect(create.body).not.toHaveProperty("note");
+    expect(create.body).not.toHaveProperty("author");
+    expect(create.body?.profile).toEqual({ fieldId: "profile", visible: false, comment: "確認済み" });
+    expect(calls.find((call) => call.method === "PATCH")).toMatchObject({
+      url: "https://service.microcms.io/api/v1/cars/cars-10",
+      body: { profile: { fieldId: "profile", visible: false, comment: "確認済み", author: "people-20" } },
+    });
+    expect(result).toMatchObject({ uploaded: 2, failures: [] });
+  });
+
+  it("converts WordPress boolean strings before creating grouped fields", async () => {
+    const ir = await writeIr([
+      doc({ fields: { visible: "0" }, repeaters: {}, relations: [] }),
+      doc({ source: { wpId: 11, postType: "car", status: "publish" }, contentId: "cars-11", fields: { visible: "1" }, repeaters: {}, relations: [] }),
+      doc({ source: { wpId: 12, postType: "car", status: "publish" }, contentId: "cars-12", fields: { visible: "" }, repeaters: {}, relations: [] }),
+    ]);
+    const creates: Array<{ url: string; body: Record<string, unknown> }> = [];
+    await importDocuments({ irDir: ir, config: groupConfig, serviceDomain: "service", apiKey: "key", sleep: async () => undefined, fetchImpl: async (url, init) => {
+      if (init?.method === "PUT") creates.push({ url: String(url), body: JSON.parse(String(init.body)) as Record<string, unknown> });
+      return init?.method === "GET" ? response({ totalCount: 3 }) : response();
+    } });
+    expect(creates.find((call) => call.url.endsWith("/cars-10"))?.body.profile).toEqual({ fieldId: "profile", visible: false });
+    expect(creates.find((call) => call.url.endsWith("/cars-11"))?.body.profile).toEqual({ fieldId: "profile", visible: true });
+    expect(creates.find((call) => call.url.endsWith("/cars-12"))?.body.profile).toEqual({ fieldId: "profile", visible: false });
+  });
+
+  it("omits an empty custom-field group from create payloads", async () => {
+    const ir = await writeIr([doc({ fields: { comment: "", note: "" }, repeaters: {}, relations: [] })]);
+    const bodies: Record<string, unknown>[] = [];
+    await importDocuments({ irDir: ir, config: groupConfig, serviceDomain: "service", apiKey: "key", sleep: async () => undefined, fetchImpl: async (_url, init) => {
+      if (init?.method === "PUT") bodies.push(JSON.parse(String(init.body)) as Record<string, unknown>);
+      return init?.method === "GET" ? response({ totalCount: 1 }) : response();
+    } });
+    expect(bodies[0]).not.toHaveProperty("profile");
+  });
+
+  it("omits SEO text fields from create payloads for seoFields:none APIs", async () => {
+    const config = defineMigration({ ...normalizationConfig, apis: {
+      ...normalizationConfig.apis,
+      cars: { ...normalizationConfig.apis.cars!, seoFields: "none" },
+    } });
+    const ir = await writeIr([doc({ relations: [] })]);
+    const bodies: Record<string, unknown>[] = [];
+    await importDocuments({ irDir: ir, config, serviceDomain: "service", apiKey: "key", sleep: async () => undefined, fetchImpl: async (_url, init) => {
+      if (init?.method === "PUT") bodies.push(JSON.parse(String(init.body)) as Record<string, unknown>);
+      return init?.method === "GET" ? response({ totalCount: 1 }) : response();
+    } });
+    expect(bodies[0]).not.toHaveProperty("seoTitle");
+    expect(bodies[0]).not.toHaveProperty("seoDescription");
+    expect(bodies[0]).toHaveProperty("noindex", true);
+  });
+
+  it("populates configured taxonomy fields from document taxonomies, including empty term definitions", async () => {
+    const ir = await writeIr([doc({
+      relations: [],
+      taxonomies: [
+        { taxonomy: "post_category", slug: "news", name: "ニュース" },
+        { taxonomy: "post_category", slug: "tutorial", name: "チュートリアル" },
+        { taxonomy: "other", slug: "ignored", name: "対象外" },
+        { taxonomy: "future_category", slug: "future", name: "将来の値" },
+      ],
+    })]);
+    const bodies: Record<string, unknown>[] = [];
+    const result = await importDocuments({ irDir: ir, config: taxonomyConfig, serviceDomain: "service", apiKey: "key", sleep: async () => undefined, fetchImpl: async (_url, init) => {
+      if (init?.method === "PUT") bodies.push(JSON.parse(String(init.body)) as Record<string, unknown>);
+      return init?.method === "GET" ? response({ totalCount: 1 }) : response();
+    } });
+    expect(bodies[0]).toMatchObject({ categories: ["ニュース", "チュートリアル"], futureCategories: ["将来の値"] });
+    expect(result).toMatchObject({ uploaded: 1, failures: [] });
   });
 
   it("retries 429 responses and skips an unchanged checksum on the next run", async () => {
