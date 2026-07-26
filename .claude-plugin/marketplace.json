@@ -1,0 +1,18 @@
+{
+  "name": "wordpress-to-200stack",
+  "description": "WordPress to microCMS + Next.js static export migration skill for Claude Code, by anytools.",
+  "owner": {
+    "name": "anytools"
+  },
+  "plugins": [
+    {
+      "name": "wordpress-to-200stack",
+      "description": "A gated workflow migrating WordPress sites to microCMS + Next.js static export deployed on 200stack, with the deterministic wpkit CLI included (Japanese only).",
+      "author": {
+        "name": "anytools"
+      },
+      "category": "development",
+      "source": "./"
+    }
+  ]
+}

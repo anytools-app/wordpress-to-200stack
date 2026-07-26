@@ -1,0 +1,24 @@
+# 依存とビルド成果物
+node_modules/
+dist/
+.next/
+out/
+
+# 案件作業ディレクトリ(kit の生成物はすべてここへ置く)
+_scratch/
+.wpkit-work/
+
+# ローカル設定・ログ
+.env
+.env.local
+*.log
+.claude/settings.local.json
+
+# serena MCP のプロジェクトインデックス(委任先が無断生成する)
+.serena/
+
+# スキルローカルのバックアップ
+skills/*/.backup/
+
+# macOS
+.DS_Store

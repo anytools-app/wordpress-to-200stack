@@ -17,7 +17,7 @@ WXR(WordPress エクスポート XML)の分析から公開までを、ゲート�
 
 - **決定的な処理は `wpkit`**(`kit/` 同梱): WXR 解析、画像移行、microCMS スキーマ生成・冪等入稿、新旧照合
 - **判断はスキル(司令塔)**: 移行スコープ・フィールド型・404/301 の裁定などの製品判断はユーザーに確認
-- **テンプレのデザイン実装は [delegate](../delegate/README.ja.md) スキルで Codex へ委任**
+- **テンプレのデザイン実装は [delegate](https://github.com/anytools-app/anytools-agent-skills/blob/main/skills/delegate/README.ja.md) スキルで Codex へ委任**
 
 ## セットアップ
 
@@ -38,9 +38,10 @@ skills/wordpress-to-200stack/
 ├── design.md      # 設計書(kit のアーキテクチャと設計判断)
 ├── templates.md   # mapping config の書式・型の決め方チェックリスト
 ├── modernize.md   # 引き渡し後の CSS モダナイズ手順(任意工程。移行スコープ外)
-├── lessons.md     # 実測記録・事故例
 └── kit/           # wpkit CLI(TypeScript。vitest テスト・Playwright 同梱)
 ```
+
+実測記録・事故例(`lessons.md` 相当)は案件を特定しうるため、各案件リポジトリの `docs/lessons.md` に置きます。このリポジトリには置きません。
 
 ## 前提
 
