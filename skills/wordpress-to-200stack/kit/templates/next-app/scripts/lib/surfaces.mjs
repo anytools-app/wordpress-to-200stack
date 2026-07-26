@@ -1,11 +1,17 @@
 /**
  * Path-to-surface rules shared by the fidelity scan and its reports.
- * 【案件ごとに必ず調整する】SPECIAL_STATIC_PATHS(固定ページ)・TAXONOMY_ROOTS・
- * archiveRoots の特例は移行元サイトのURL設計に合わせて書き換える(以下は実案件の例)。
+ * TODO(案件): SPECIAL_STATIC_PATHS・TAXONOMY_ROOTS・ARCHIVE_ROOT_APIS は移行元サイトのURL設計に合わせて調整する。
  */
+// 固定ページ（microCMS を経由せず src/app/<route>/page.tsx で実装するパス）を列挙する。
 export const SPECIAL_STATIC_PATHS = new Set(["/company", "/contact", "/privacy"]);
 
+// タクソノミー一覧として扱うパス根。案件の custom taxonomy スラッグを追加する。
 const TAXONOMY_ROOTS = new Set(["category", "tag"]);
+
+// 一覧パスの根と API 名が異なる場合、または同じパス根の下に別 API の詳細ルートが同居していて routes.json からの先勝ち推定が誤る場合に指定する。
+const ARCHIVE_ROOT_APIS = new Map([
+  // ["news", "posts"],
+]);
 
 /** Decode an inventory pathname once, remove a trailing slash, and always return an absolute path. */
 export function normalizePathname(pathname) {
@@ -24,11 +30,10 @@ function archiveRoots(routes) {
   for (const route of routes) {
     if (!route.api || !route.path) continue;
     const root = normalizePathname(route.path).split("/")[1];
-    if (!root || root === "item") continue;
+    if (!root || ARCHIVE_ROOT_APIS.has(root)) continue;
     if (!roots.has(root)) roots.set(root, route.api);
   }
-  // /item is a listing for the items API; about-item detail routes share this prefix.
-  roots.set("item", "items");
+  for (const [root, api] of ARCHIVE_ROOT_APIS) roots.set(root, api);
   return roots;
 }
 

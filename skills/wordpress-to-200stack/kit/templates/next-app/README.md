@@ -38,8 +38,9 @@ microCMS を使う通常ビルドでは `.env.local` に `MICROCMS_SERVICE_DOMAI
 
 1. `src/templates/registry.ts` に API / kind ごとのテンプレートと、公開してよい検索フィールドを登録する。
 2. 記事テンプレート、header/footer、一覧、フォームを実装し、固定ページは `src/app/<route>/page.tsx` と `page.module.css` に書き起こす。
-3. `NEXT_PUBLIC_SITE_URL`、メディアホスト、iframe 許可ホストを案件の値にする。
-4. `WPKIT_DATA_SOURCE=ir npm run build` をまず通し、入稿後は microCMS モードでもビルドする。
+3. `scripts/lib/surfaces.mjs` の `SPECIAL_STATIC_PATHS` / `TAXONOMY_ROOTS` / `ARCHIVE_ROOT_APIS` を案件の URL 設計に合わせる。
+4. `NEXT_PUBLIC_SITE_URL`、メディアホスト、iframe 許可ホストを案件の値にする。
+5. `WPKIT_DATA_SOURCE=ir npm run build` をまず通し、入稿後は microCMS モードでもビルドする。
 
 `registry.ts` 未登録の API は記事用の `ArticleTemplate`（title + legacyBodyHtml）で表示されます。`NotImplemented` は案件側の記事テンプレート作成中に明示的な未実装表示を出したい場合に利用できます。これらを固定ページの描画には使いません。
 

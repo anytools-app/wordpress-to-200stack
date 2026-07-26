@@ -9,7 +9,7 @@ WordPress 由来の CSS を残したまま Next.js App Router の静的エクス
 - 静的出力は `out/`、公開アセットは `public/`、legacy body の静的出力への反映は `scripts/apply-legacy-body.mjs` を使う構成であること
 - `linkedom`、`css-tree`、`playwright`、`pixelmatch`、`pngjs` を案件側の開発依存に追加できること
 
-`scripts/vendor-css.mjs`、`scripts/audit-css.mjs`、`scripts/css-visual-diff.mjs` の先頭にある `TODO(案件):` は、取り込み前に必ず埋めます。`legacy-origin.invalid` は内部の URL 解決用ダミーオリジンなので変更不要です。
+`scripts/vendor-css.mjs`、`scripts/audit-css.mjs`、`scripts/css-visual-diff.mjs`、`scripts/verify-stylesheets.mjs` の先頭にある `TODO(案件):` は、取り込み前に必ず埋めます。`legacy-origin.invalid` は内部の URL 解決用ダミーオリジンなので変更不要です。
 
 ## ファイルと役割
 
@@ -25,6 +25,7 @@ WordPress 由来の CSS を残したまま Next.js App Router の静的エクス
 | `src/components/SiteLink.tsx` | 内部パスだけを `next/link` にし、外部 URL と新規タブは通常の `<a>` に保つ。 |
 | `src/app/layout.tsx.example` | 遷移時に body 属性と有効 CSS bundle を同期する MutationObserver と、`LegacyChrome` の安全な設置位置の例。 |
 | `scripts/css-visual-diff.mjs` | 静的 `out/` を配信して before / after の全ページ・desktop / mobile スクリーンショットを pixel diff する。 |
+| `scripts/verify-stylesheets.mjs` | アーカイブ原文 HTML の stylesheet 一覧と、静的出力・`legacy-generated.sources.json` の整合を照合する。 |
 
 ## 適用順
 
@@ -38,7 +39,7 @@ WordPress 由来の CSS を残したまま Next.js App Router の静的エクス
 ## 取り込み手順
 
 1. このディレクトリの `scripts/` を案件の `scripts/`、`src/components/` を案件の `src/components/` へコピーする。`src/app/layout.tsx.example` の Observer 部分を既存 layout に統合する。
-2. `vendor-css.mjs` の `legacyThemeBundlePath`、`audit-css.mjs` の `legacyOrigin` / `legacyThemeScriptRoot`、`css-visual-diff.mjs` の `requiredPages` を案件値へ変更する。
+2. `vendor-css.mjs` の `legacyThemeBundlePath`、`audit-css.mjs` の `legacyOrigin` / `legacyThemeScriptRoot`、`css-visual-diff.mjs` の `requiredPages`、`verify-stylesheets.mjs` の既定 `targets`（コマンド引数でも指定可）を案件値へ変更し、`WPKIT_ORIGIN` に移行元オリジンを設定する。
 3. `LegacyChrome` が参照する `.next-data/legacy-meta.json` と `.next-data/css-bundles.json` を、既存の prebuild / static export フローで生成する。各ページには可視コンテンツの後で `<LegacyChrome path={normalizedPath} />` を置く。
 4. `package.json` に少なくとも bundle 生成を組み込む。既存の build 前処理へ連結する場合の例:
 

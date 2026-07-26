@@ -186,7 +186,8 @@ npm run wpkit -- import --ir ../_scratch/ir --dry-run   # oversized 0 を確認 
 `templates/next-app/scripts/` に `fidelity-scan.mjs`(全ページを凍結スクショと
 pixelmatch 比較、surface=テンプレ種別ごとに集計)と `fidelity-report.mjs`
 (ワースト表の TODO 生成)、`lib/surfaces.mjs`(パス→surface 規則。
-**案件のURL設計に合わせて必ず調整**)がある。
+**案件のURL設計に合わせて必ず調整**。調整対象は `SPECIAL_STATIC_PATHS` /
+`TAXONOMY_ROOTS` / `ARCHIVE_ROOT_APIS`)がある。
 
 ```bash
 node scripts/fidelity-scan.mjs [--only <surfaceId>]   # WPKIT_ARCHIVE / WPKIT_IR_DIR / WPKIT_ORIGIN を環境変数で

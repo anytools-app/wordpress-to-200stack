@@ -3,8 +3,18 @@ import { join, resolve } from "node:path";
 
 const project = resolve(import.meta.dirname, "..");
 const archivePages = join(project, "_scratch", "archive-full", "pages");
-const targets = ["/page-a/1", "/items/1", "/item", "/works/1", "/", "/privacy"];
+// TODO(案件): 代表 surface と、CSS 構成が異なるページを網羅する URL に変更する。コマンド引数で上書きできる。
+const defaultTargets = ["/"];
+const targets = process.argv.slice(2).length > 0 ? process.argv.slice(2) : defaultTargets;
+// TODO(案件): WPKIT_ORIGIN に移行元オリジンを指定する。
+const legacyOrigin = process.env.WPKIT_ORIGIN ?? "https://www.example.com";
+const legacyHost = new URL(legacyOrigin).hostname.toLowerCase().replace(/^www\./, "");
 const sourcesPath = join(project, "src", "app", "legacy-generated.sources.json");
+
+if (targets.some((path) => !path.startsWith("/"))) {
+  console.error("Usage: node scripts/verify-stylesheets.mjs [/path ...] (paths must be absolute.)");
+  process.exit(1);
+}
 
 function decodeHtmlAttribute(value) {
   return value.replace(/&(amp|#0*38);/gi, "&");
@@ -22,8 +32,9 @@ function attribute(tag, name) {
 
 function stylesheetHref(href) {
   try {
-    const url = new URL(href, "https://www.example.com") /* TODO(案件): 移行元オリジン */;
-    if ((url.protocol === "http:" || url.protocol === "https:") && /(^|\.)example\.com$/i.test(url.hostname)) return url.pathname;
+    const url = new URL(href, legacyOrigin);
+    const host = url.hostname.toLowerCase();
+    if ((url.protocol === "http:" || url.protocol === "https:") && (host === legacyHost || host.endsWith(`.${legacyHost}`))) return url.pathname;
   } catch {
     // 破損した外部URLは原文の文字列のまま照合する。
   }
