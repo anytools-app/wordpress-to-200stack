@@ -3,6 +3,18 @@
 All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.3.0] - 2026-07-26
+
+### Changed
+
+- 案件A移行の最終形(ネイティブ実装、CSS Modules、Next.js Data Cache、SiteLink、formrun、fidelity + pixel-gate、verifyスイート、`routing-config.jsonc`)を新規移行のデフォルト成果物へ昇格し、スキル文書を全面改訂
+- `modernize.md`を、テーマCSS温存方式で移行済みの既存案件を最終形へ引き上げる手順へ再位置づけ
+- `lessons.md`へ案件Aの実測ノウハウ全11章を取り込み
+
+### Note
+
+- kitテンプレのコード追随はPhase 2(次リリース)で行う
+
 ## [0.2.0] - 2026-07-26
 
 ### Added

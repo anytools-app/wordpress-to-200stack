@@ -1,6 +1,6 @@
 # wordpress-to-200stack — WordPress 静的サイト移行
 
-WordPress サイトを **microCMS + Next.js 静的エクスポート**に変換して **200stack** にデプロイするための移行スキルです。同梱の決定的 CLI(`wpkit`)が機械的な処理を担い、スキル本文(`SKILL.md`)が判断と品質ゲートを定めます。
+WordPress サイトを **microCMS + formrun + Next.js 静的エクスポート**に変換して **200stack** にデプロイするための移行スキルです。固定ページ・記事テンプレともネイティブ JSX + CSS Modules で実装し、旧テーマ CSS は成果物へ持ち込みません。同梱の決定的 CLI(`wpkit`)が機械的な処理を担い、スキル本文(`SKILL.md`)が判断と品質ゲートを定めます。
 
 **Note: this skill is written in Japanese.**
 
@@ -10,13 +10,15 @@ WXR(WordPress エクスポート XML)の分析から公開までを、ゲート�
 
 ```text
 0. archive(現行サイトの凍結)→ 1. analyze → 2. mapping config(製品判断)
-→ 3. parse(ゲート1: errors 0)→ 4. media pull/push(ゲート2)
-→ 5. schema gen → microCMS 作成 → import(ゲート3)
-→ 6. next-app 展開 → テンプレ実装委任 → 7. verify(ゲート4: 新旧照合)→ 8. 200stack 公開
+→ 3. parse(ゲート1: errors 0)→ 4. media(ゲート2)
+→ 5. schema gen → microCMS作成 → import(ゲート3。実装の前提)
+→ 6. next-app展開 → ネイティブ実装ループ(ピクセル比較)
+→ 7. verifyスイート(ゲート4)→ 8. 200stack公開
 ```
 
 - **決定的な処理は `wpkit`**(`kit/` 同梱): WXR 解析、画像移行、microCMS スキーマ生成・冪等入稿、新旧照合
 - **判断はスキル(司令塔)**: 移行スコープ・フィールド型・404/301 の裁定などの製品判断はユーザーに確認
+- **成果物は straight-to-final**: 固定ページは`src/app/<page>/page.tsx`、CMS記事は一覧+`[id]`+`src/templates/`、全てCSS Modules。内部リンクはSiteLink(`next/link`)、フォームはformrun
 - **テンプレのデザイン実装は [delegate](https://github.com/anytools-app/anytools-agent-skills/blob/main/skills/delegate/README.ja.md) スキルで Codex へ委任**
 
 ## セットアップ
@@ -37,7 +39,7 @@ skills/wordpress-to-200stack/
 ├── SKILL.md       # 移行フロー・ゲート・判断基準(正)
 ├── design.md      # 設計書(kit のアーキテクチャと設計判断)
 ├── templates.md   # mapping config の書式・型の決め方チェックリスト
-├── modernize.md   # 引き渡し後の CSS モダナイズ手順(任意工程。移行スコープ外)
+├── modernize.md   # 旧方式で移行済みの既存案件を最終形へ引き上げる手順
 ├── lessons.md     # 案件ごとの実測記録(WXR の罠、プラグイン固有の癖、事故)
 └── kit/           # wpkit CLI(TypeScript。vitest テスト・Playwright 同梱)
 ```

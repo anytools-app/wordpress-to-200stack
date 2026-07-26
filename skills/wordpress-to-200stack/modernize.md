@@ -1,8 +1,10 @@
-# 引き渡し後モダナイズ(CSS Hardening)— 任意工程
+# 旧方式で移行済み案件のモダナイズ(CSS Hardening)
 
-移行完了後にサイトを「育てる」場合の CSS 近代化(legacy CSS の縮小、CSS Modules 化、tokens 導入)の手順。**移行スコープ外の任意工程**であり、顧客が明示的に発注した場合のみ実施する。
+**新規案件には不要**。新規案件のデフォルト成果物は最初からネイティブ JSX + CSS Modules + SiteLink + Next.js Data Cache であり、旧テーマ CSS を持ち込まない。本書は、テーマ CSS 温存方式で移行済みの既存案件をその最終形へ引き上げる別工程である。
 
-> **大原則: 移行完了 ≠ CSS 健全化。** 移行の完了条件は fidelity / verify ゲート通過(`SKILL.md`)であり、legacy CSS の削除・CSS Modules 化・`!important` ゼロはそこに含めない。この工程を移行フェーズに混ぜてはいけない(1テンプレート単位の委任ループと変更範囲の向きが逆になり、再現度と速度の両方が壊れる)。
+> **適用境界:** 旧方式の完了条件(fidelity / verify ゲート通過)を崩さず、別工程としてCSS所有権と配信機構を段階移行する。新規案件の実装指示書へこの段階移行を混ぜない。
+
+案件A では B4〜B10 で全ページをCSS Modules化し、テーマCSSを完全撤去した。検証は原文AST等価、カスケード勝者監査、変更前後の視覚回帰を組み合わせ、静的監査が通った変更からも3回帰を検出・修正した。詳細な数値と経緯は案件A側の`docs/css-modules-mechanism.md` / `docs/lessons.md §9`を参照する。
 
 ## 開始条件(全部満たすまで着手しない)
 
@@ -99,9 +101,9 @@
 
 ---
 
-# 配信モダナイズ(CSS delivery / SPA化)— 任意トラック
+# 配信モダナイズ(CSS delivery / SPA化)— 既存案件向けトラック
 
-外部 CSS の自前化、未使用 CSS の削減、CSS bundle 配信、`next/link` による SPA 遷移を扱うトラック。上の CSS Hardening(CSS Modules 化・tokens 導入)とは**独立**であり、どちらか一方だけを採用してよい。移行の完了条件には含めない。
+外部 CSS の自前化、未使用 CSS の削減、CSS bundle 配信、`next/link` による SPA 遷移を扱う、旧方式の既存案件向けトラック。上の CSS Hardening(CSS Modules 化・tokens 導入)とは**独立**であり、どちらか一方だけを採用してよい。
 
 汎用アセットは [`kit/templates/modernize-css/`](kit/templates/modernize-css/) に置く。案件へのコピー方法、依存、コマンド例は同ディレクトリの README を正とする。
 
