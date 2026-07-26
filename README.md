@@ -51,10 +51,11 @@ ln -s "$PWD/skills/wordpress-to-200stack" ~/.claude/skills/wordpress-to-200stack
     ├── design.md              # 設計書(kit のアーキテクチャと設計判断)
     ├── templates.md           # mapping config の書式・型の決め方チェックリスト
     ├── modernize.md           # 引き渡し後の CSS モダナイズ手順(任意工程。移行スコープ外)
+    ├── lessons.md             # 案件ごとの実測記録(WXR の罠、プラグイン固有の癖、事故)
     └── kit/                   # wpkit CLI(TypeScript。vitest テスト・Playwright 同梱)
 ```
 
-実案件の知見(`lessons.md` 相当)は各案件リポジトリの `docs/lessons.md` に置き、このリポジトリには置きません。
+実案件の知見・事故例は `skills/wordpress-to-200stack/lessons.md` に記録します。このリポジトリは非公開ですが、認証情報・個人情報・`_scratch/` の生成物は記録しません。
 
 ## 前提
 

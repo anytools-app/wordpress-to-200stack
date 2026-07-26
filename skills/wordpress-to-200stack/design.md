@@ -2,7 +2,7 @@
 
 目的: WordPress サイトの静的リニューアル案件を「決定的なスクリプト群 + Claude Code スキル」で再現可能にし、
 案件あたりの人手作業を大幅に圧縮する。
-複数の実案件で得た再現性・運用負荷・障害の知見を、案件固有情報を含めず設計へ反映する。
+複数の実案件で得た再現性・運用負荷・障害の知見を設計へ反映する。案件固有の実測は `lessons.md` に残し、複数案件で再現したものを設計へ昇格させる。
 
 ## 全体アーキテクチャ
 
@@ -27,10 +27,12 @@ wp-static-kit/                     # 独立リポジトリ(npm workspace / TypeS
 ```
 
 ```
-~/.claude/skills/wp-migrate/
+skills/wordpress-to-200stack/
   SKILL.md       # ワークフロー規約(下記フロー)・判断チェックリスト・品質ゲート
+  design.md      # 設計書(このファイル)
   templates.md   # mapping config の書き方、テンプレ実装指示書の雛形(delegate 用)
-  lessons.md     # 案件ごとの実測記録(WXR の罠、プラグイン固有の癖)
+  modernize.md   # 引き渡し後の CSS モダナイズ手順(任意工程。移行スコープ外)
+  lessons.md     # 案件ごとの実測記録(WXR の罠、プラグイン固有の癖、事故)
 ```
 
 ## CLI コマンド設計(すべて冪等・再実行可能)

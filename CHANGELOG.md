@@ -3,6 +3,16 @@
 All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.2.0] - 2026-07-26
+
+### Added
+
+- `skills/wordpress-to-200stack/lessons.md` を復活。以前削除した内容を復元し、記録ルールのヘッダを追加
+
+### Changed
+
+- リポジトリの非公開化に伴い「実測ノウハウ・案件固有情報をこのリポジトリに置かない」方針を撤廃。`README.md` / `skills/wordpress-to-200stack/README.md` / `SKILL.md` / `SECURITY.md` / `design.md` / `CLAUDE.md` を新方針へ更新し、認証情報・個人情報・`_scratch/` 生成物を記録しない線引きは維持
+
 ## [0.1.0] - 2026-07-26
 
 ### Added

@@ -38,10 +38,11 @@ skills/wordpress-to-200stack/
 ├── design.md      # 設計書(kit のアーキテクチャと設計判断)
 ├── templates.md   # mapping config の書式・型の決め方チェックリスト
 ├── modernize.md   # 引き渡し後の CSS モダナイズ手順(任意工程。移行スコープ外)
+├── lessons.md     # 案件ごとの実測記録(WXR の罠、プラグイン固有の癖、事故)
 └── kit/           # wpkit CLI(TypeScript。vitest テスト・Playwright 同梱)
 ```
 
-実測記録・事故例(`lessons.md` 相当)は案件を特定しうるため、各案件リポジトリの `docs/lessons.md` に置きます。このリポジトリには置きません。
+実測記録・事故例は `lessons.md` に記録します。このリポジトリは非公開ですが、認証情報・個人情報・`_scratch/` の生成物は記録しません。
 
 ## 前提
 
