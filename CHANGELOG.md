@@ -3,6 +3,21 @@
 All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.5.0] - 2026-07-26
+
+### Added
+
+- 稼働テーマ一式の凍結取得を §0 に追加し、実装後の突き合わせゲート §6.6(クエリ条件・表示分岐・enqueue JS)を新設
+- アクセシビリティを §8.6 としてデフォルト品質基準に追加(本番アーカイブとの axe-core 差分で「違反を増やさない」を完了条件に)
+- 本文の `wpautop` 適用を parse の必須ルール化。保存先サニタイザが落とす不正な入れ子の検出も設計へ
+- 並び順の正本を「archive の実描画順」と明記(`pre_get_posts` の並び替えプラグイン対策)。`wp:menu_order` の取り込み方針を追記
+- `WP_Query` ブロックの固定配列化禁止、内部リンクの新ルート化、CMS 駆動箇所での派生サイズ画像の不使用を実装規約へ
+- 基準ref方式ゲートの2コミット運用、スクロール連動(IntersectionObserver)の検証手順を追記
+
+### Note
+
+- 契機は 案件A 案件でテーマ入手後に実施した突き合わせ(実装漏れ13件・誤報7件)。実測値は `lessons.md` §12
+
 ## [0.4.0] - 2026-07-26
 
 ### Changed
