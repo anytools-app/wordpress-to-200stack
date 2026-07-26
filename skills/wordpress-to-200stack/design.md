@@ -2,7 +2,7 @@
 
 目的: WordPress サイトの静的リニューアル案件を「決定的なスクリプト群 + Claude Code スキル」で再現可能にし、
 案件あたりの人手作業を大幅に圧縮する。
-実案件(WordPress サイト)を最初の実データテストケースとして構築した。
+複数の実案件で得た再現性・運用負荷・障害の知見を、案件固有情報を含めず設計へ反映する。
 
 ## 全体アーキテクチャ
 
@@ -50,7 +50,7 @@ wp-static-kit/                     # 独立リポジトリ(npm workspace / TypeS
   - **SCF/ACF リピータは同名 meta の出現順 zip 復元**。空文字も行として保持し、列数不一致は error
     (プラグイン別アダプタ: smart-custom-fields / ACF / 素の postmeta)
   - publish のみ移行対象(draft/private は監査用に分離出力)。設定投稿(SCF定義等)は自動除外
-  - 本文 HTML は legacyBodyHtml として保持。画像 URL・内部リンクを台帳で書き換え、
+  - microCMS へ移行する記事本文 HTML は legacyBodyHtml として保持。画像 URL・内部リンクを台帳で書き換え、
     script 除去・埋め込み(YouTube/Vimeo/Instagram/GCal)はプレースホルダー化
   - relation(投稿間参照)は wp_id で解決し relations.json へ
   - 本文の inline style は inline-styles.json に集計(要素数・出現ページ・プロパティ頻度)。
@@ -91,7 +91,13 @@ microCMS の前提:
 
 ### wpkit archive <url> / wpkit verify <old> <new>
 - archive: sitemap+リンククロールで全 URL 収集 → HTML・ヘッダー・canonical・スクショ(desktop/mobile)保存。
-  切替後は取得不能になる基準データなので着手時に必ず実行
+  切替後は取得不能になる基準データなので着手時に必ず実行。保存 HTML とスクショは固定ページの
+  書き起こし・人間レビューにも使うが、実行時に再掲するデータソースにはしない
+- archive のブラウザは DPR 1 でクロールするため、`srcset` の 2x 候補や `@2x` 資産は要求されず、
+  通常のキャッシュには入らない。保存 HTML の `srcset` とテーマ資産参照から 2x 候補を列挙し、
+  アーカイブ検証時に fetch-once キャッシュ経由で別途回収する。書き起こし側でも 1x/2x の組を照合する
+- アーカイブ取得・スクショ比較・ローカルレビューの外部リクエストは、キャッシュ → archive assets →
+  未取得時だけネットワーク、の fetch-once 解決を維持し、原点へ同一 URL を繰り返し要求しない
 - verify: 新旧の URL パリティ(旧200が新でも200)、内部リンク・画像404、title/description/canonical/OGP 比較、
   Playwright スクショ差分(閾値超えのみ人がトリアージ)→ HTML レポート
 
@@ -101,7 +107,11 @@ microCMS の前提:
 export default defineMigration({
   wxr: "./export.xml",
   site: { origin: "https://www.example.jp", mediaHost: "https://media.example.jp" },
-  exclude: { postTypes: ["archived"], statuses: ["draft", "private"] },
+  exclude: { postTypes: ["page", "<除外する型>"], statuses: ["draft", "private"] },
+  linkCheck: {
+    assumeExistPostTypes: ["page"],
+    assumeExistPaths: ["/<コード実装するパス>"],
+  },
   apis: {
     articles: {
       from: "post",
@@ -120,21 +130,41 @@ export default defineMigration({
 analyze が config の雛形(フィールド定義込み)を自動生成し、人は削る・名前を整える・統合を決めるだけ。
 **ここが案件ごとの主要な判断ポイント**で、スキルのチェックリストが確認観点を規定する。
 
+固定ページ(通常は `page`)は `exclude.postTypes` で IR / microCMS の対象外にし、移行後も存在する URL を
+`linkCheck.assumeExistPostTypes` / `assumeExistPaths` へ登録する。記事本文の `legacyBodyHtml` 方針は維持し、
+固定ページへ流用しない。
+
 ## Next.js スケルトン(templates/next-app)
 
 案件を跨いで不変の基盤をテンプレ化:
 - `output: 'export'` 構成、trailingSlash、custom image loader
-- routes.json 駆動の catch-all ルート + `generateStaticParams`(dynamicParams=false)
+- CMS 由来コンテンツ向けの routes.json 駆動 catch-all ルート + `generateStaticParams`(dynamicParams=false)
 - Repository 層(microCMS クライアント: 全件ページング取得・ビルド時のみ fetch)
-- legacyBodyHtml レンダラ(サニタイズ+埋め込みコンポーネント置換)
+- 記事用 legacyBodyHtml レンダラ(サニタイズ+埋め込みコンポーネント置換)
+- 固定ページ用の App Router ネイティブ実装規約(`src/app/<route>/page.tsx` + `page.module.css` + `metadata`)
 - formrun 接続フォーム(入力→確認→送信の状態機械。フォーム台帳から生成)
 - 検索インデックス生成(一覧の絞り込み用軽量 JSON)
 - sitemap / robots / メタ(Yoast 由来)自動出力
 - microCMS ドラフトプレビュー(`/preview/` CSR シェル。読み取り専用キー+実画面と同一テンプレで描画。後述)
 - verify と対になる data-testid 規約
 
-案件固有で書くのは **CSS とテンプレコンポーネントの見た目だけ**。ここは AI 委任(Codex)+人間レビュー。
-archive のスクショ・保存 HTML を「凍結された仕様書」として指示書に添付する運用をスキルが規定。
+案件固有で書くのは **記事テンプレの見た目と、固定ページの JSX / CSS Modules / metadata**。
+ここは AI 委任(Codex)+人間レビュー。archive のスクショ・保存 HTML は「凍結された参照資料」として
+指示書に添付するが、固定ページのランタイム入力にはしない。
+
+### 固定ページの提供設計
+
+- 1ページずつ JSX とページローカルな CSS Modules へ書き起こす。ページ固有スタイルを Global CSS や
+  他の固定ページへ一般化しない
+- まず単純なページでルート、metadata、レスポンシブ画像、CSS スコープ、レビュー手順のパターンを確立し、
+  承認後にフォームや複雑なレイアウトを持つページへ進む
+- 各ページで「書き起こし → dev / production build の表示確認 → 原文との desktop/mobile 対比スクショ →
+  人間レビュー → 指摘反映」を繰り返す。ピクセル一致や差分率を合格条件にせず、レビュー指摘で収束させる
+- 画像は 1x/2x の `srcset` または同等のレスポンシブ指定を持たせ、DPR 1 のアーカイブで回収されない
+  `@2x` 資産を fetch-once キャッシュ経由で補完する
+- アーカイブ HTML の再掲データ、原文 HTML 再掲コンポーネント、postbuild による body class/id 注入を
+  デフォルト機構にしない。ビルド後処理は dev / 本番乖離を生み、原文の素材欠陥を直伝播させ、
+  body 属性を前提にしたページ限定 CSS は他ページへ漏れやすいためである
 
 ## スキル(wp-migrate)のワークフロー
 
@@ -142,7 +172,8 @@ archive のスクショ・保存 HTML を「凍結された仕様書」として
 2. mapping.config 作成 → `wpkit parse` → validation エラー 0 になるまで config を直す(ゲート1)
 3. `wpkit archive`(基準凍結)、`wpkit media pull/push`(欠損レポート確認 = ゲート2)
 4. `wpkit schema gen` → microCMS へ投入 → `wpkit import --dry-run` → 本入稿 → 突き合わせ(ゲート3)
-5. スケルトン展開 → テンプレ実装を delegate 規約で Codex へ(テンプレ単位の指示書、スクショ添付)
+5. スケルトン展開 → 記事テンプレはテンプレ単位、固定ページは1ページ単位で Codex へ委任する。
+   固定ページは単純なページから対比スクショと人間レビューを回し、承認済みパターンを重いページへ展開する
 6. `wpkit verify` → 差分トリアージ → 修正ループ(ゲート4)
 7. 切替チェックリスト(DNS・最終差分移行・監視)
 

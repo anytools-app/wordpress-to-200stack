@@ -33,6 +33,8 @@ npm run wpkit -- archive <https://origin> -o ../_scratch/archive   # まず --li
 
 - **切替後は二度と取れない基準データ**(HTML・メタ・スクショ・アセット・フォーム台帳・リダイレクト記録)
 - `forms.json` が外部フォーム endpoint の台帳。`meta.json` の redirects 記録が 301 表の材料になる
+- 保存 HTML とスクショは、固定ページを書き起こす際の参照素材・レビュー比較対象として使う。実行時に HTML を再掲するデータソースにはしない
+- archive の Playwright クロールは DPR 1 で行うため、`srcset` の 2x 候補や `@2x` 資産はブラウザから要求されず、通常のキャッシュには入らない。保存 HTML の `srcset` とテーマ資産参照を棚卸しし、2x 候補を fetch-once キャッシュ経由で別途回収してからアーカイブ完了とする
 
 ### 原点サーバー保護(fetch-once。違反すると本番を止める)
 
@@ -61,7 +63,7 @@ npm run wpkit -- analyze <export.xml> -o ../_scratch/analysis
 - config の書式・型の決め方チェックリストは `templates.md`。**フィールド型は必ずサンプル実値で決める**:
   SCF 画像フィールドは attachment の wp_id が入る(`type:"image"` で kit が URL 解決)、wp_id 参照は relation、
   "0"/"1" は boolean、価格は単位に注意(万円単位の実例あり)
-- 本文は `legacyBodyHtml`(HTML文字列)。リッチエディタに入れない
+- microCMS 対象の記事本文は `legacyBodyHtml`(HTML文字列)。リッチエディタに入れない
 
 ### 2.5 現行管理画面のフィールド精査(閲覧のみ・人が画面を開く)
 
@@ -87,7 +89,7 @@ npm run wpkit -- parse --config ../mapping.config.ts -o ../_scratch/ir
 - errors(URL衝突・リピータ列数不一致・metaキー参照ミス)は必ず原因特定。warnings は監査対象
   (タクソノミーアーカイブへのリンク → 再現するか判断 / 数値変換失敗 / Yoast テンプレ変数)
 - ルート数 =「publish −(除外+SCF設定投稿)」を census と突き合わせる
-- コード実装するページは `exclude.postTypes` + `linkCheck.assumeExistPostTypes`
+- 固定ページ(通常は WordPress の `page`)は microCMS に入れない。`exclude.postTypes` で除外し、移行後も存在する URL は `linkCheck.assumeExistPostTypes` / `assumeExistPaths` に登録する。提供は App Router の専用ルート(`src/app/<route>/page.tsx` + `page.module.css` + `metadata`)としてコード実装する
 
 ### 4. media(ゲート2: missing を人が確認)
 
@@ -126,7 +128,9 @@ npm run wpkit -- media transform --ir ../_scratch/ir --cache ../_scratch/remote-
   レンダリング寸法は 1px も変えない**(fidelity 承認を壊さない)
 - `media pull` / `media push`(S3 互換)は外部ストレージが指定された例外案件向けに残置
 - 見落としがちな回収物: テーマ外の `/docs/*.pdf` 等の添付、ページ限定 CSS(archive 全ページの
-  `link[rel=stylesheet]` を集計してから回収リストを作る)
+  `link[rel=stylesheet]` を集計してから回収リストを作る)、`srcset` の 1x/2x 画像と `@2x` テーマ資産。
+  **DPR 1 の archive クロールは 2x 候補を取得しない**ため、書き起こし時とアーカイブ検証時の両方で
+  `srcset` 候補を抽出し、fetch-once の枠内で未回収の 2x 資産を補完する
 
 ### 5. microCMS(ゲート3: 件数照合)
 
@@ -153,10 +157,11 @@ npm run wpkit -- import --ir ../_scratch/ir --dry-run   # oversized 0 を確認 
 ### 6. Next.js(テンプレ実装は delegate へ)
 
 - `cp -R kit/templates/next-app <案件>/site` → `WPKIT_DATA_SOURCE=ir` で microCMS 未契約でもビルド可
+- CMS 由来の記事・一覧は routes.json 駆動の catch-all と `src/templates/registry.ts` で実装し、固定ページは catch-all や microCMS に混ぜず、`src/app/<route>/page.tsx` の通常ページとして実装する
 - **microCMS ドラフトプレビュー(`/preview/` CSR シェル)はデフォルト成果物**: 読み取り専用 GET キー必須・実画面と同一テンプレ描画・draftKey 任意・noindex+sitemap 除外。仕様は `design.md` の「microCMS ドラフトプレビュー」節
 - **デザイン検証中は dev 用 config(mediaHost=現行ドメイン)で parse した ir-dev を使い、
   本番切替時に本 config で parse し直す**(media transform 前でも画像が見える)
-- テンプレ実装指示書は `templates.md` の雛形を使用。**指示書に必ず入れる規律**(実案件で確立):
+- 記事系テンプレの実装指示書は `templates.md` の雛形を使用。**記事系の指示書に必ず入れる規律**(実案件で確立):
   1. 原文 page.html との DOM タグ実体数一致を完了条件にする(substring 数は RSC ペイロードで2倍に見える)
   2. jQuery プラグイン(imgLiquid/slick/lity)の見た目は追加 CSS で代替(テーマ CSS は編集禁止)
   3. 原文の DOM 順を崩さない(float 回り込み)。原文に無い要素を追加しない
@@ -164,9 +169,20 @@ npm run wpkit -- import --ir ../_scratch/ir --dry-run   # oversized 0 を確認 
 - レビューは司令塔がローカルで実施: typecheck / build / **Playwright 実画面スクショと原文スクショの比較**
   (委任先 sandbox は listen・ブラウザ不可のため実画面確認は司令塔の仕事)
 
+#### 固定ページのネイティブ実装ループ
+
+1. 固定ページを難易度順に並べ、まず内容とレイアウトが単純な1ページを選ぶ
+2. アーカイブの保存 HTML を構造・文言・リンク・画像の参照素材として読み、専用の `page.tsx`、ページローカルな CSS Modules、`metadata` を書く。画像は 1x/2x の `srcset`(または同等のレスポンシブ画像指定)を用意し、`@2x` の回収漏れを確認する
+3. dev サーバーと production build の両方でページを表示し、desktop/mobile の対比スクショを原文スクショと並べて人間レビューへ出す
+4. レビュー指摘を反映して同じページで再比較し、承認後に次のページへ進む。単純なページで JSX・metadata・CSS スコープ・画像のパターンを確立してから、フォームや複雑なレイアウトを持つ重いページへ展開する
+
+固定ページはピクセル一致を要求しない。機械差分は比較材料に留め、文言・機能・レスポンシブ挙動・レビュー指摘の解消で収束させる。
+
+**デフォルトにしない方式**: アーカイブ原文 HTML の再掲データ、原文 HTML を注入する汎用コンポーネント、body class/id の postbuild 注入など、ビルド後処理に依存する再現機構は採用しない。これらは (1) dev と静的出力の乖離、(2) 欠落した高解像度素材など原文側の欠陥の直伝播、(3) ページ限定 CSS の見出しルール等が他ページへ漏れるスコープ事故を起こす。CSS Modules をページ単位の境界とし、必要な body 属性に依存しない JSX/CSS へ書き起こす。
+
 ### 6.5 デザイン忠実再現の diff-first ループ(fidelity)
 
-テンプレ実装後の再現度追い込みは、感覚でなく機械スクショ差分で回す。kit の
+記事系テンプレ実装後の再現度追い込みは、感覚でなく機械スクショ差分で回す。固定ページにも差分画像を比較材料として使えるが、ratio やピクセル一致を承認ゲートにはしない。kit の
 `templates/next-app/scripts/` に `fidelity-scan.mjs`(全ページを凍結スクショと
 pixelmatch 比較、surface=テンプレ種別ごとに集計)と `fidelity-report.mjs`
 (ワースト表の TODO 生成)、`lib/surfaces.mjs`(パス→surface 規則。

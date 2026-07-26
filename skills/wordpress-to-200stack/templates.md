@@ -14,7 +14,7 @@ export default defineMigration({
   },
   linkCheck: {
     assumeExistPostTypes: ["page"],          // 除外してもURLは存在し続ける型
-    assumeExistPaths: ["/custom-order"],        // コード実装する一覧ページ等
+    assumeExistPaths: ["/<コード実装するパス>"], // コード実装する一覧ページ等
   },
   apis: {
     <api名>: {
@@ -50,7 +50,7 @@ export default defineMigration({
 ## テンプレ実装指示書の雛形(delegate で Codex へ)
 
 ```markdown
-# 実装指示書: <テンプレ名>(例: item 詳細)
+# 実装指示書: <テンプレ名>(例: 記事詳細)
 
 ## 目的
 site/ の Next.js(静的エクスポート)に <route パターン> の表示テンプレートを実装する。
@@ -62,7 +62,7 @@ site/ の Next.js(静的エクスポート)に <route パターン> の表示テ
 ## 実装
 - site/src/templates/<Name>Template.tsx を作成し registry.ts に登録
 - 表示項目: <フィールド → 画面要素の対応表>
-- 画像は URL 文字列(R2)。next/image は unoptimized 設定済み
+- 画像は移行後のメディア URL 文字列。next/image は unoptimized 設定済み
 - 既存 CSS(site/src/styles/legacy/)のクラスを流用し、新規 CSS は最小限
 
 ## 検証
@@ -74,11 +74,40 @@ site/ の Next.js(静的エクスポート)に <route パターン> の表示テ
 - styles/legacy/ のルール削除・大規模なセレクタ書き換え・値の統一(CSS モダナイズは移行スコープ外 → modernize.md)
 ```
 
+## 固定ページ実装指示書の雛形(delegate で Codex へ)
+
+```markdown
+# 実装指示書: 固定ページ <route>
+
+## 目的
+固定ページを microCMS やアーカイブ HTML の再掲ではなく、App Router の通常ページとして書き起こす。
+参照素材:
+- スクショ: _scratch/archive/pages/<page>/desktop.png / mobile.png
+- HTML: _scratch/archive/pages/<page>/page.html(文言・リンク・画像・構造の参考のみ)
+
+## 実装
+- `site/src/app/<route>/page.tsx`、`page.module.css`、ページ固有の `metadata` を実装する
+- 固定ページ固有の CSS を Global CSS や別ページへ一般化しない
+- 画像は 1x/2x の `srcset` または同等のレスポンシブ指定を持たせ、未回収の `@2x` は fetch-once キャッシュ経由で補完する
+- アーカイブ原文 HTML の再掲データ、汎用再掲コンポーネント、postbuild の body 属性注入を追加しない
+
+## 検証とレビュー
+- dev サーバーと production build の両方で対象ルートを確認する
+- desktop/mobile の実装スクショを原文スクショと並べて提出する
+- ピクセル一致を完了条件にせず、人間レビューの指摘を反映して同じページを再確認する
+- 単純なページでパターンを承認してから、複雑な固定ページへ進む
+
+## 禁止
+- site/ 外の変更、依存追加、コミット
+- 記事系 `legacyBodyHtml` / `rewriteBodyMedia` の変更
+```
+
 ## 切替チェックリスト(コピーして案件 issue に)
 
 - [ ] コンテンツ凍結の合意(日時)
 - [ ] 最終 WXR で analyze→parse→import 差分実行
 - [ ] media pull 差分 → R2 push
+- [ ] 固定ページの `srcset` 1x/2x と `@2x` 資産を照合し、DPR 1 の archive で未回収の候補を fetch-once で補完
 - [ ] verify(スクショ込み)エラー0・差分トリアージ済み
 - [ ] microCMS webhook → ビルドフック接続確認(テスト更新→自動デプロイ)
 - [ ] メディアドメイン DNS・SSL 確認
