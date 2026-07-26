@@ -1,5 +1,5 @@
 import { LegacyHtml } from "@/components/LegacyHtml";
-import type { LegacyDocument } from "@/lib/manifest";
+import type { LegacyDocument } from "@/lib/content/types";
 
 export type DocumentTemplateProps = { document: LegacyDocument };
 

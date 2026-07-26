@@ -172,15 +172,25 @@ function rewriteBodyMedia(document: LegacyDocument, value: unknown, mediaMap: Me
   });
 }
 
+function stripNullValue(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value
+      .filter((item) => item !== null && item !== undefined)
+      .map(stripNullValue);
+  }
+  if (value && typeof value === "object") {
+    return stripNullValues(value as Record<string, unknown>);
+  }
+  return value;
+}
+
 function stripNullValues(payload: Record<string, unknown>): Record<string, unknown> {
   // microCMS はメディアフィールドに null を送ると 504 でタイムアウトする(2026-07 実測)。
   // 新規入稿で null を送る必要はないため、null/undefined のキーは送信しない(repeater 内も同様)。
   const cleaned: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(payload)) {
     if (value === null || value === undefined) continue;
-    cleaned[key] = Array.isArray(value)
-      ? value.map((item) => (item && typeof item === "object" && !Array.isArray(item) ? stripNullValues(item as Record<string, unknown>) : item))
-      : value;
+    cleaned[key] = stripNullValue(value);
   }
   return cleaned;
 }
@@ -315,6 +325,7 @@ async function readMediaMap(path: string): Promise<MediaMap> {
 async function requestWithRetry(fetchImpl: FetchLike, limiter: WriteRateLimiter, url: string, init: RequestInit, sleep: (milliseconds: number) => Promise<void>): Promise<Response> {
   let last: Response | undefined;
   for (let retry = 0; retry <= 5; retry += 1) {
+    last = undefined;
     await limiter.take();
     try {
       // 応答が返らないハング(504系の間欠障害時に実測)をリトライへ転換するため60秒で打ち切る。
@@ -328,9 +339,20 @@ async function requestWithRetry(fetchImpl: FetchLike, limiter: WriteRateLimiter,
     } catch (error) {
       if (retry === 5) throw error;
     }
-    if (retry < 5) await sleep(Math.min(2_000 * (2 ** retry), 30_000));
+    if (retry < 5) {
+      const retryAfter = last ? retryAfterMilliseconds(last.headers.get("retry-after")) : undefined;
+      await sleep(retryAfter ?? Math.min(2_000 * (2 ** retry), 30_000));
+    }
   }
   return last!;
+}
+
+function retryAfterMilliseconds(value: string | null): number | undefined {
+  if (!value) return undefined;
+  const seconds = Number(value);
+  if (Number.isFinite(seconds) && seconds >= 0) return seconds * 1000;
+  const timestamp = Date.parse(value);
+  return Number.isNaN(timestamp) ? undefined : Math.max(0, timestamp - Date.now());
 }
 
 function baseUrl(serviceDomain: string): string {

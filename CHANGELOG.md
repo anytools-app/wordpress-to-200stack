@@ -3,6 +3,14 @@
 All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.4.0] - 2026-07-26
+
+### Changed
+
+- Next.js 雛形を前段 `build:data` / IR hydration から、microCMS Data Cache + Promise snapshot の直接取得へ移行
+- CMS 詳細を surface 別動的 segment へ分解し、SiteLink、低メモリ build wrapper、route/form/stylesheet/Web Vitals 検証を標準化
+- import / media upload の null 正規化、60秒 timeout、5xx retry、`Retry-After` 対応を強化
+
 ## [0.3.0] - 2026-07-26
 
 ### Changed

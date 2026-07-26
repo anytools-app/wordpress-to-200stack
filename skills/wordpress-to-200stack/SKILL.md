@@ -276,16 +276,16 @@ export function SiteLink({ href, ...props }: ComponentPropsWithoutRef<"a">) {
 npm run wpkit -- verify --old ../_scratch/archive --new ../site/out -o ../_scratch/verify
 ```
 
-missing は意図した除外だけにし、metaMismatches は0を目標にする。加えて、テンプレの `scripts/` に次のゲートを置く(未追加のスクリプトは Phase 2 でテンプレへ追加)。
+missing は意図した除外だけにし、metaMismatches は0を目標にする。加えて、テンプレの `scripts/` に次のゲートを置く。
 
 | コマンド | 守るもの | 実行時期 |
 |---|---|---|
 | `npm run typecheck` / `npm run lint` | 型 / lint・format | 常時 |
 | `npm run verify:t6`(`scripts/verify-t6.mjs`) | フォーム構造と承認済み fixture の一致 | フォーム・ページ変更後 |
-| `npm run verify:routes` | 旧URL台帳を新routeまたは301で全カバー、重複0。`out/` の実在パスと照合 | URL・ID・リダイレクト変更後 |
-| `npm run verify:seo` | title / description / robots / canonical / OGP / JSON-LD / sitemap / preview noindex | SEO・ルート変更後 |
-| `npm run verify:stylesheets` | 各ページの期待 stylesheet 構成 | link構成変更後 |
-| `npm run verify:webvitals-preload` | preload URL と描画 URL の完全一致 | LCP・画像・preload変更後 |
+| `npm run verify:routes`(`scripts/verify-routes.mjs`) | 旧URL台帳を新routeまたは301で全カバー、重複0。`out/` の実在パスと照合 | URL・ID・リダイレクト変更後 |
+| `npm run verify:seo`(`scripts/verify-seo.mjs`) | title / description / robots / canonical / OGP / JSON-LD / sitemap / preview noindex | SEO・ルート変更後 |
+| `npm run verify:stylesheets`(`scripts/verify-stylesheets.mjs`) | 各ページの期待 stylesheet 構成 | link構成変更後 |
+| `npm run verify:webvitals-preload`(`scripts/verify-webvitals-preload.mjs`) | preload URL と描画 URL の完全一致 | LCP・画像・preload変更後 |
 
 fixture は原文から作った期待値であり、**承認付き更新のみ**。現行出力から自動再生成する自己参照にしない。
 

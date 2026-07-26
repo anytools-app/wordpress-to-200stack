@@ -4,7 +4,7 @@ import { ContentRepository } from "@/lib/repository";
 
 export const dynamic = "force-static";
 
-function siteUrl(): URL { return new URL(process.env.NEXT_PUBLIC_SITE_URL ?? "http://localhost:3000"); }
+function siteUrl(): URL { return new URL(process.env.NEXT_PUBLIC_SITE_ORIGIN ?? "http://localhost:3000"); }
 
 export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   const repository = await ContentRepository.load();

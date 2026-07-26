@@ -8,7 +8,7 @@ export const SPECIAL_STATIC_PATHS = new Set(["/company", "/contact", "/privacy"]
 // タクソノミー一覧として扱うパス根。案件の custom taxonomy スラッグを追加する。
 const TAXONOMY_ROOTS = new Set(["category", "tag"]);
 
-// 一覧パスの根と API 名が異なる場合、または同じパス根の下に別 API の詳細ルートが同居していて routes.json からの先勝ち推定が誤る場合に指定する。
+// 一覧パスの根と API 名が異なる場合に指定する。
 const ARCHIVE_ROOT_APIS = new Map([
   // ["news", "posts"],
 ]);

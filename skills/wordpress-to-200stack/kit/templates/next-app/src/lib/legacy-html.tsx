@@ -6,7 +6,7 @@ const STRUCTURAL_TAGS = [
 ];
 
 function allowedHosts(override?: readonly string[]): Set<string> {
-  const configured = override ?? process.env.WPKIT_IFRAME_HOSTS?.split(",").map((host) => host.trim()).filter(Boolean) ?? DEFAULT_IFRAME_HOSTS;
+  const configured = override ?? DEFAULT_IFRAME_HOSTS;
   return new Set(configured.map((host) => host.toLowerCase()));
 }
 

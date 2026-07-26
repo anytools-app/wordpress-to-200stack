@@ -185,6 +185,55 @@ class RateLimiter {
   }
 }
 
+function retryAfterMilliseconds(value: string | null): number | undefined {
+  if (!value) return undefined;
+  const seconds = Number(value);
+  if (Number.isFinite(seconds) && seconds >= 0) return seconds * 1000;
+  const timestamp = Date.parse(value);
+  return Number.isNaN(timestamp) ? undefined : Math.max(0, timestamp - Date.now());
+}
+
+async function uploadWithRetry(
+  fetchImpl: typeof fetch,
+  limiter: RateLimiter,
+  endpoint: string,
+  apiKey: string,
+  form: FormData,
+  sleep: (milliseconds: number) => Promise<void>,
+): Promise<Response> {
+  let lastResponse: Response | undefined;
+  let lastError: unknown;
+  for (let attempt = 0; attempt <= 5; attempt += 1) {
+    lastResponse = undefined;
+    await limiter.take();
+    try {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 60_000);
+      try {
+        lastResponse = await fetchImpl(endpoint, {
+          method: "POST",
+          headers: { "X-MICROCMS-API-KEY": apiKey },
+          body: form,
+          signal: controller.signal,
+        });
+      } finally {
+        clearTimeout(timer);
+      }
+      if (lastResponse.status !== 429 && lastResponse.status < 500) return lastResponse;
+    } catch (error) {
+      lastError = error;
+    }
+    if (attempt < 5) {
+      const retryAfter = lastResponse
+        ? retryAfterMilliseconds(lastResponse.headers.get("retry-after"))
+        : undefined;
+      await sleep(retryAfter ?? Math.min(2_000 * 2 ** attempt, 30_000));
+    }
+  }
+  if (lastResponse) return lastResponse;
+  throw lastError;
+}
+
 /** Uploads cache-backed CMS image references; it never fetches the legacy origin. */
 export async function uploadMedia(options: MediaUploadOptions): Promise<MediaUploadResult> {
   const documents = await readDocuments(options.irDir);
@@ -209,7 +258,8 @@ export async function uploadMedia(options: MediaUploadOptions): Promise<MediaUpl
   const apiKey = options.apiKey ?? process.env.MICROCMS_API_KEY;
   if (!serviceDomain || !apiKey) throw new Error("MICROCMS_SERVICE_DOMAIN と MICROCMS_API_KEY が必要です");
   const fetchImpl = options.fetchImpl ?? fetch;
-  const limiter = new RateLimiter(options.sleep ?? ((milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds))));
+  const sleep = options.sleep ?? ((milliseconds: number) => new Promise<void>((resolve) => setTimeout(resolve, milliseconds)));
+  const limiter = new RateLimiter(sleep);
   const now = options.now ?? (() => new Date());
   const endpoint = managementUrl(serviceDomain);
   for (const entry of cached) {
@@ -217,18 +267,8 @@ export async function uploadMedia(options: MediaUploadOptions): Promise<MediaUpl
       const prepared = await preparedUpload(entry.body, entry.url);
       const form = new FormData();
       form.set("file", new Blob([new Uint8Array(prepared.body)], { type: prepared.type }), filenameFor(entry.url, prepared.filenameExtension));
-      // 429 は指数バックオフで最大5回リトライする(バックオフなしで残件全滅した実測より)。
-      let response: Response;
-      let attempt = 0;
-      while (true) {
-        await limiter.take();
-        response = await fetchImpl(endpoint, { method: "POST", headers: { "X-MICROCMS-API-KEY": apiKey }, body: form });
-        if (response.status !== 429 || attempt >= 5) break;
-        const retryAfter = Number(response.headers.get("retry-after"));
-        const backoff = Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter * 1000 : Math.min(60_000 * 2 ** attempt, 300_000);
-        attempt += 1;
-        await (options.sleep ?? ((ms: number) => new Promise((resolve) => setTimeout(resolve, ms))))(backoff);
-      }
+      // 429/5xx/60秒timeout は、Retry-After を優先して最大5回リトライする。
+      const response = await uploadWithRetry(fetchImpl, limiter, endpoint, apiKey, form, sleep);
       if (!response.ok) throw new Error(`HTTP ${response.status}: ${(await response.text().catch(() => "")).slice(0, 1000)}`);
       const payload = await response.json() as { url?: unknown };
       if (typeof payload.url !== "string" || !payload.url) throw new Error("レスポンスに配信 URL がありません");

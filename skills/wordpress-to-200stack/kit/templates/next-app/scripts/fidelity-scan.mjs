@@ -15,9 +15,8 @@ import { createCachedServer } from "./serve-cached.mjs";
 const project = resolve(import.meta.dirname, "..");
 const outDir = join(project, "out");
 const fidelityDir = join(project, "_scratch", "fidelity");
-// 凍結アーカイブとIRの場所(kit規約の既定。案件でディレクトリ名が違う場合は環境変数で上書き)
-const archiveDir = process.env.WPKIT_ARCHIVE ?? join(project, "_scratch", "archive");
-const irDir = process.env.WPKIT_IR_DIR ?? join(project, "_scratch", "ir");
+// 凍結アーカイブは fidelity の参照入力専用。
+const archiveDir = process.env.WPKIT_ARCHIVE_DIR ?? join(project, "_scratch", "archive");
 const baselineRoot = join(archiveDir, "pages");
 const currentRoot = join(fidelityDir, "current");
 const diffsRoot = join(fidelityDir, "diffs");
@@ -210,13 +209,10 @@ function printSummary(records) {
 
 async function main() {
   const options = parseArgs(process.argv.slice(2));
-  const [inventory, routes] = await Promise.all([
-    readFile(join(archiveDir, "inventory.json"), "utf8").then(JSON.parse),
-    readFile(join(irDir, "routes.json"), "utf8").then(JSON.parse),
-  ]);
+  const inventory = await readFile(join(archiveDir, "inventory.json"), "utf8").then(JSON.parse);
   const allRecords = inventory.urls.filter((entry) => entry.status === 200).map((entry) => {
     const path = normalizePathname(new URL(entry.url).pathname);
-    return { url: entry.url, path, surface: surfaceForPath(path, routes) };
+    return { url: entry.url, path, surface: surfaceForPath(path) };
   });
   const selected = allRecords.filter((record) => existsSync(outputFile(record.path)) && (!options.only || record.surface === options.only)).slice(0, options.limit);
 

@@ -1,0 +1,35 @@
+import { notFound } from "next/navigation";
+
+import { SiteLink } from "@/components/SiteLink";
+import { ContentRepository } from "@/lib/repository";
+
+type PageProps = { params: Promise<{ path: string[] }> };
+
+export const dynamicParams = false;
+
+// TODO(案件): taxonomy / archive の残余ルートだけを列挙する。CMS 詳細は各 surface/[id] が担当する。
+const RESIDUAL_ARCHIVES: readonly { path: string[]; api: string; title: string }[] = [];
+
+export async function generateStaticParams(): Promise<Array<{ path: string[] }>> {
+  return RESIDUAL_ARCHIVES.map(({ path }) => ({ path }));
+}
+
+export default async function LegacyRoutePage({ params }: PageProps) {
+  const path = (await params).path;
+  const archive = RESIDUAL_ARCHIVES.find(
+    (candidate) => candidate.path.join("/") === path.join("/"),
+  );
+  if (!archive) return notFound();
+  const repository = await ContentRepository.load();
+  return <main>
+    <h1>{archive.title}</h1>
+    <ul>{repository.byApi(archive.api).map((document) => <li key={document.contentId}>
+      <SiteLink href={document.route.path}>{document.content.title}</SiteLink>
+    </li>)}</ul>
+  </main>;
+}
+
+// NOTE: このファイルが .example なのは、output: "export" では generateStaticParams が
+// 空配列を返すルートを「missing generateStaticParams」としてビルド失敗させるため(Next 16 実測)。
+// taxonomy アーカイブ等の残余ルートが必要になったら、RESIDUAL_ARCHIVES を埋めてから
+// page.tsx へリネームする。空のままリネームするとビルドが落ちる。

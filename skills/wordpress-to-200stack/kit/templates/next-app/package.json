@@ -3,16 +3,19 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "npm run build:data && next dev",
-    "build:data": "tsx scripts/build-data.ts",
-    "prebuild": "npm run build:data",
-    "build": "next build",
+    "dev": "next dev",
+    "build": "node scripts/build-app.mjs",
     "start": "next start",
     "typecheck": "tsc --noEmit",
     "format": "biome format --write .",
     "lint": "biome check .",
     "lint:fix": "biome check --write .",
-    "verify:seo": "node scripts/verify-seo.mjs"
+    "verify:t6": "node scripts/verify-t6.mjs",
+    "verify:routes": "node scripts/verify-routes.mjs",
+    "verify:seo": "node scripts/verify-seo.mjs",
+    "verify:stylesheets": "node scripts/verify-stylesheets.mjs",
+    "verify:webvitals-preload": "node scripts/verify-webvitals-preload.mjs",
+    "fixtures:update": "node scripts/update-archive-fixtures.mjs"
   },
   "dependencies": {
     "next": "^16.0.0",
@@ -25,10 +28,10 @@
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "@types/sanitize-html": "^2.16.0",
+    "linkedom": "^0.18.13",
     "pixelmatch": "^7.2.0",
     "playwright": "^1.61.1",
     "pngjs": "^7.0.0",
-    "tsx": "^4.0.0",
     "typescript": "^5.0.0",
     "@biomejs/biome": "^2.4.0"
   }

@@ -1,5 +1,4 @@
-import Link from "next/link";
-
+import { SiteLink } from "@/components/SiteLink";
 import { ContentRepository } from "@/lib/repository";
 
 export default async function HomePage() {
@@ -8,7 +7,7 @@ export default async function HomePage() {
     <h1>Site</h1>
     {repository.latestByApi().map(({ api, documents }) => <section key={api}>
       <h2>{api}</h2>
-      <ul>{documents.map((document) => <li key={document.contentId}><Link href={document.route.path}>{document.content.title}</Link></li>)}</ul>
+      <ul>{documents.map((document) => <li key={document.contentId}><SiteLink href={document.route.path}>{document.content.title}</SiteLink></li>)}</ul>
     </section>)}
   </main>;
 }

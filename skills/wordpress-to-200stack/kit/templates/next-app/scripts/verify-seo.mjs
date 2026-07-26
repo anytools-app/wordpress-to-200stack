@@ -12,7 +12,7 @@ const outDirectory = resolve(project, process.env.SEO_OUT_DIR ?? "out");
 const archiveDirectory = resolve(project, process.env.WPKIT_ARCHIVE_DIR ?? join("_scratch", "archive-full"));
 const reportDirectory = resolve(project, "_scratch", "seo-audit");
 const intentionalDiffsPath = resolve(project, "docs", "seo-intentional-diffs.json");
-const siteUrl = new URL(process.env.NEXT_PUBLIC_SITE_URL ?? "https://www.example.com" /* TODO(案件) */);
+const siteUrl = new URL(process.env.NEXT_PUBLIC_SITE_ORIGIN ?? "https://www.example.com" /* TODO(案件) */);
 const OG_ITEMS = ["title", "description", "url", "image", "type", "site_name", "locale"];
 const ERROR_ROUTES = new Set(["/404", "/_not-found"]);
 
@@ -142,17 +142,11 @@ async function readJson(path) {
 }
 
 async function loadAliases() {
-  for (const path of [
-    join(project, ".next-data", "legacy-meta.json"),
-    join(project, "data", "build-snapshot", "legacy-meta.json"),
-  ]) {
-    try {
-      return (await readJson(path)).legacyPathAliases ?? {};
-    } catch {
-      // build:data 前でも snapshot にフォールバックする。
-    }
+  try {
+    return (await readJson(join(project, "src", "data", "legacy-route-aliases.json"))) ?? {};
+  } catch {
+    return {};
   }
-  return {};
 }
 
 async function loadArchivePages() {

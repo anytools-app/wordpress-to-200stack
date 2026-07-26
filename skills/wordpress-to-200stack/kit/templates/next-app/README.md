@@ -1,61 +1,103 @@
 # wp-static-kit Next.js skeleton
 
-WordPress から生成した IR を、microCMS と Next.js 静的エクスポートへつなぐ案件開始用の雛形です。見た目の CSS や案件固有コンポーネントは含みません。
+microCMS を唯一のコンテンツ正本にする Next.js App Router / static export 雛形です。
+旧サイトの保存データは実行時も build 前処理でも読みません。固定ページはネイティブ
+JSX + CSS Modules、CMS 詳細は surface ごとの動的 segment、taxonomy/archive だけを
+残余 catch-all で実装します。
 
-## このテンプレートが保証すること
+残余 catch-all は `src/app/[...path]/page.tsx.example` として同梱しています。
+`output: "export"` は `generateStaticParams` が空配列のルートを
+「missing generateStaticParams」としてビルド失敗させる(Next 16 実測)ため、
+必要になったら `RESIDUAL_ARCHIVES` を埋めてから `page.tsx` へリネームしてください。
 
-- `routes.json` 台帳から静的な catch-all ルートを全生成します（`/` は `src/app/page.tsx`）。未登録パスは出力しません。
-- ビルド時に microCMS を API ごとに `limit=100` / `offset` で全件取得し、IR と `contentId` で突き合わせます。
-- `WPKIT_DATA_SOURCE=ir` なら microCMS を使わず `documents.ndjson` だけでビルドできます。
-- microCMS 由来の記事本文の legacy HTML は `LegacyHtml` だけで描画し、script・イベント属性を除去します。iframe は許可ホスト以外を除去します。
-- 固定ページは microCMS や catch-all に含めず、App Router の `page.tsx` + CSS Modules + `metadata` で実装します。
-- SEO メタ、sitemap、robots、確認画面付きフォーム、検索用の最小 JSON を備えます。
-
-## 配置と起動
-
-`wpkit parse` の出力を、展開先の `site/` に対して次のように置きます。
-
-```
-project/
-  ir/
-    documents.ndjson
-    routes.json
-  site/                 # このテンプレートを cp -R した場所
-```
+## 起動
 
 ```sh
-cd project/site
 cp .env.example .env.local
 npm install
-WPKIT_DATA_SOURCE=ir npm run build
+npm run dev
+npm run build
 ```
 
-IR の場所が異なる場合は `WPKIT_IR_DIR=/absolute/or/relative/ir` を指定してください。IR モードでは `MICROCMS_SERVICE_DOMAIN` と `MICROCMS_API_KEY` は不要です。ローカル確認は同じ環境変数を付けて `npm run dev` を実行します（起動前にデータを生成します）。
+最低限 `MICROCMS_SERVICE_DOMAIN` とサーバー専用 `MICROCMS_API_KEY` が必要です。
+公開 URL は `NEXT_PUBLIC_SITE_ORIGIN`、画像配信先は `NEXT_PUBLIC_MEDIA_HOST` に設定します。
+実装済み preview を使う場合だけ、読み取り専用キーを
+`NEXT_PUBLIC_MICROCMS_PREVIEW_KEY` に設定します。書き込み権限のあるキーを公開変数へ
+入れないでください。
 
-microCMS を使う通常ビルドでは `.env.local` に `MICROCMS_SERVICE_DOMAIN` とサーバー専用の `MICROCMS_API_KEY` を設定し、`npm run build` を実行します。取得結果は `.next-data/` にだけ保存され、公開されません。
+環境変数は次だけを標準契約とします。
 
-## 案件側で行うこと
+- `MICROCMS_SERVICE_DOMAIN`
+- `MICROCMS_API_KEY`
+- `NEXT_PUBLIC_MICROCMS_SERVICE_DOMAIN`
+- `NEXT_PUBLIC_MICROCMS_PREVIEW_KEY`
+- `NEXT_PUBLIC_MEDIA_HOST`
+- `NEXT_PUBLIC_SITE_ORIGIN`
+- `WPKIT_ARCHIVE_DIR`
+- `BUILD_MEMORY_LIMIT_MB`
 
-1. `src/templates/registry.ts` に API / kind ごとのテンプレートと、公開してよい検索フィールドを登録する。
-2. 記事テンプレート、header/footer、一覧、フォームを実装し、固定ページは `src/app/<route>/page.tsx` と `page.module.css` に書き起こす。
-3. `scripts/lib/surfaces.mjs` の `SPECIAL_STATIC_PATHS` / `TAXONOMY_ROOTS` / `ARCHIVE_ROOT_APIS` を案件の URL 設計に合わせる。
-4. `NEXT_PUBLIC_SITE_URL`、メディアホスト、iframe 許可ホストを案件の値にする。
-5. `WPKIT_DATA_SOURCE=ir npm run build` をまず通し、入稿後は microCMS モードでもビルドする。
+## API / surface の追加順
 
-`registry.ts` 未登録の API は記事用の `ArticleTemplate`（title + legacyBodyHtml）で表示されます。`NotImplemented` は案件側の記事テンプレート作成中に明示的な未実装表示を出したい場合に利用できます。これらを固定ページの描画には使いません。
+1. `src/templates/registry.ts` に API / kind の描画テンプレートを登録する。
+2. `src/app/<surface>/page.tsx` の一覧と `src/app/<surface>/[id]/page.tsx` の詳細を作る。
+   詳細では `surface-detail.tsx` の params / metadata / render を共有し、
+   `dynamicParams = false` を必ず宣言する。
+3. `src/lib/content/microcms-document.ts` の `MICROCMS_APIS` と、必要なら
+   `SURFACE_BY_API`、taxonomy・案件フィールドの正規化を更新する。
+4. 一覧・詳細・`src/app/sitemap.ts` が同じ `ContentRepository` snapshot を参照する。
+5. 実装済み `/preview/` で registry 対象の API・template を確認し、`noindex` と
+   sitemap 除外を `verify:seo` で確認する。
 
-## 固定ページの雛形方針
+詳細ページの最小形:
 
-固定ページごとに次の App Router 標準構成を作ります。固定ページを一括再掲する共通コンポーネントや JSON データは、この雛形に含めません。
+```tsx
+import {
+  renderSurfaceDetail,
+  surfaceDetailMetadata,
+  surfaceDetailParams,
+  type SurfaceDetailPageProps,
+} from "@/lib/content/surface-detail";
 
-```text
-src/app/<route>/
-  page.tsx          # JSX と metadata（または generateMetadata）
-  page.module.css   # このページに閉じたスタイル
+const API = "news";
+export const dynamicParams = false;
+export const generateStaticParams = () => surfaceDetailParams(API);
+export const generateMetadata = async ({ params }: SurfaceDetailPageProps) =>
+  surfaceDetailMetadata(API, (await params).id);
+export default async function Page({ params }: SurfaceDetailPageProps) {
+  return renderSurfaceDetail(API, (await params).id);
+}
 ```
 
-アーカイブの `page.html` は文言・リンク・画像・構造の参照素材、desktop/mobile スクショは人間レビューの比較対象としてだけ使います。まず単純な1ページを書き起こし、dev と production build の両方で表示し、原文との対比スクショをレビューして指摘を反映します。パターンの承認後に複雑なページへ進みます。ピクセル一致は完了条件にしません。
+内部リンクは必ず `SiteLink` を使います。`/` 始まりかつ `//` でなく、
+`target="_blank"` でないものだけ `next/link` へ渡します。
 
-画像は 1x/2x の `srcset` または同等のレスポンシブ指定を用意します。アーカイブのクロールは DPR 1 のため 2x 候補や `@2x` 資産を自動取得しません。保存 HTML から候補を列挙し、原点へ同じ URL を繰り返し要求しない fetch-once キャッシュ経由で補完します。
+## build と検証
 
-postbuild で body class/id を注入する仕組みや、アーカイブ HTML を実行時に再掲する仕組みは追加しません。dev と静的出力の乖離、原文側の素材欠陥の直伝播、ページ限定 CSS の漏れを避けるためです。記事系の `legacyBodyHtml` / `rewriteBodyMedia` は別の経路として維持します。
+build wrapper は開始時に `.next/cache/fetch-cache` を消し、1 build 中は
+microCMS の fetch を `revalidate:false` で凍結します。
+`BUILD_MEMORY_LIMIT_MB` がある環境では webpack、worker 制約、V8 heap 上限を有効にします。
+
+```sh
+npm run typecheck
+npm run lint
+npm run build
+npm run verify:t6
+npm run verify:routes
+npm run verify:seo
+npm run verify:stylesheets
+npm run verify:webvitals-preload
+```
+
+`forms.json` と `stylesheets.json` は凍結 archive 由来の契約です。更新は
+`WPKIT_ARCHIVE_DIR=/absolute/archive npm run fixtures:update -- --approve` の承認付き操作だけを
+使い、現行 `out/` から再生成しません。stylesheet fixture の `legacyStylesheets` は archive
+から更新される「出力に残してはいけない旧CSS」、`expectedStylesheets` は人が最終構成を
+レビューして手動承認する完全一致リストです。updater は既存の `expectedStylesheets` を保持し、
+新規ページへ自動設定しません。
+
+`verify:webvitals-preload` は preload URL と描画 URL の完全一致、およびローカル URL の
+ファイル実在を検証します。オフライン実行を前提とするため remote URL の到達性は検証せず、
+スキップしたことをレポートします。
+
+`routing-config.jsonc` は旧 URL の301正本です。`src/data/legacy-routes.json` の全 URL が
+実出力または301先の実出力へ到達し、新ルート重複が0であることを `verify:routes` が検証します。

@@ -83,6 +83,25 @@ describe("wpkit import", () => {
     expect(sleeps.some((milliseconds) => milliseconds >= 250)).toBe(true);
   });
 
+  it("falls back from create-only PUT to PATCH when the content ID already exists", async () => {
+    const ir = await writeIr([doc({ relations: [] })]);
+    const methods: string[] = [];
+    const result = await importDocuments({
+      irDir: ir,
+      serviceDomain: "service",
+      apiKey: "key",
+      sleep: async () => undefined,
+      fetchImpl: async (_url, init) => {
+        const method = init?.method ?? "GET";
+        methods.push(method);
+        if (method === "PUT") return response({ message: "Content already exists" }, 400);
+        return method === "GET" ? response({ totalCount: 1 }) : response();
+      },
+    });
+    expect(methods.slice(0, 2)).toEqual(["PUT", "PATCH"]);
+    expect(result).toMatchObject({ uploaded: 1, failures: [] });
+  });
+
   it("nests grouped fields during create and PATCHes grouped relations with the full custom-field object", async () => {
     const ir = await writeIr([
       doc({
@@ -184,6 +203,38 @@ describe("wpkit import", () => {
     const second = await importDocuments({ irDir: ir, serviceDomain: "service", apiKey: "key", fetchImpl: mockedFetch, sleep: async () => undefined });
     expect(first.uploaded).toBe(1); expect(puts).toBe(2); expect(second).toMatchObject({ skipped: 1, uploaded: 0 });
     expect(JSON.parse(await readFile(join(ir, "import-state.json"), "utf8"))).toHaveProperty("cars-10");
+  });
+
+  it("strips null recursively and honors Retry-After seconds and HTTP-date on 5xx", async () => {
+    const ir = await writeIr([doc({
+      fields: {
+        nested: { keep: "value", remove: null, deep: { remove: null, keep: 1 } },
+        rows: [{ keep: true, remove: null }, null],
+      },
+      relations: [],
+    })]);
+    const sleeps: number[] = [];
+    const bodies: Record<string, unknown>[] = [];
+    let attempts = 0;
+    await importDocuments({
+      irDir: ir,
+      serviceDomain: "service",
+      apiKey: "key",
+      sleep: async (milliseconds) => { sleeps.push(milliseconds); },
+      fetchImpl: async (_url, init) => {
+        if (init?.method === "PUT") {
+          bodies.push(JSON.parse(String(init.body)) as Record<string, unknown>);
+          attempts += 1;
+          if (attempts === 1) return new Response("", { status: 503, headers: { "retry-after": "2" } });
+          if (attempts === 2) return new Response("", { status: 503, headers: { "retry-after": new Date(Date.now() + 4_000).toUTCString() } });
+        }
+        return init?.method === "GET" ? response({ totalCount: 1 }) : response();
+      },
+    });
+    expect(bodies[0]?.nested).toEqual({ keep: "value", deep: { keep: 1 } });
+    expect(bodies[0]?.rows).toEqual([{ keep: true }]);
+    expect(sleeps).toContain(2_000);
+    expect(sleeps.some((value) => value >= 3_000 && value <= 4_000)).toBe(true);
   });
 
   it("POSTs provisional IDs, persists their assigned IDs before the next POST, and skips them on rerun", async () => {

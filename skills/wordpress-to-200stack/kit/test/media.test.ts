@@ -317,4 +317,30 @@ describe("wpkit media upload", () => {
     const result = await uploadMedia({ irDir, cacheDir, config: mediaConfig, mapPath, serviceDomain: "service", apiKey: "key", fetchImpl: async () => { calls += 1; return new Response(); } });
     expect(calls).toBe(0); expect(result.uploaded).toBe(0); expect(result.failures).toEqual([expect.objectContaining({ url, message: expect.stringContaining("5MB") })]);
   });
+
+  it("retries 5xx and honors Retry-After seconds and HTTP-date while preserving MIME", async () => {
+    const root = await tempDir(); const irDir = join(root, "ir"); const cacheDir = join(root, "cache"); const mapPath = join(root, "map.json");
+    await (await import("node:fs/promises")).mkdir(irDir, { recursive: true }); await (await import("node:fs/promises")).mkdir(cacheDir, { recursive: true });
+    const url = "https://old.test/wp-content/uploads/retry.png";
+    await writeFile(join(irDir, "documents.ndjson"), `${JSON.stringify(uploadDocument({ featured: url }))}\n`);
+    await cacheImage(cacheDir, url, Buffer.from("png"));
+    const sleeps: number[] = [];
+    const files: File[] = [];
+    let attempts = 0;
+    const result = await uploadMedia({
+      irDir, cacheDir, config: mediaConfig, mapPath, serviceDomain: "service", apiKey: "key",
+      sleep: async (milliseconds) => { sleeps.push(milliseconds); },
+      fetchImpl: async (_endpoint, init) => {
+        files.push((init?.body as FormData).get("file") as File);
+        attempts += 1;
+        if (attempts === 1) return new Response("", { status: 502, headers: { "retry-after": "2" } });
+        if (attempts === 2) return new Response("", { status: 503, headers: { "retry-after": new Date(Date.now() + 4_000).toUTCString() } });
+        return new Response(JSON.stringify({ url: "https://images.microcms-assets.io/assets/retry" }), { headers: { "content-type": "application/json" } });
+      },
+    });
+    expect(result).toMatchObject({ uploaded: 1, failures: [] });
+    expect(files.every((file) => file.type === "image/png")).toBe(true);
+    expect(sleeps).toContain(2_000);
+    expect(sleeps.some((value) => value >= 3_000 && value <= 4_000)).toBe(true);
+  });
 });

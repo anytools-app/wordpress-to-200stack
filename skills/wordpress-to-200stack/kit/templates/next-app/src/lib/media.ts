@@ -7,7 +7,7 @@ const manifest = rawManifest as Record<string, unknown>;
 const UPLOAD_PATH = "/wp-content/uploads/";
 const ABSOLUTE_URL = /^[a-z][a-z\d+.-]*:/i;
 // 旧サイトのオリジン。相対 /wp-content/uploads/ を解決するためだけに使う。
-const LEGACY_ORIGIN = process.env.NEXT_PUBLIC_LEGACY_ORIGIN ?? "https://example.invalid";
+const LEGACY_ORIGIN = process.env.NEXT_PUBLIC_SITE_ORIGIN ?? "https://example.invalid";
 
 function localMediaPath(pathname: string): string | undefined {
   const entry = manifest[pathname];

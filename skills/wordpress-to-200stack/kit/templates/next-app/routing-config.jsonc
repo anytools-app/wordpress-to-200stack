@@ -1,0 +1,13 @@
+{
+  // TODO(案件): 旧URLをすべて exact または regex の301へ確定する。
+  "version": 1,
+  "rules": [
+    // {
+    //   "id": "legacy-example",
+    //   "patternSyntax": "exact",
+    //   "source": "/old-path",
+    //   "destination": "/new-path",
+    //   "statusCode": 301
+    // }
+  ]
+}
