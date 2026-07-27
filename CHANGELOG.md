@@ -3,6 +3,18 @@
 All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.6.0] - 2026-07-27
+
+### Added
+
+- `recipes.md` を新設し、カルーセル、レイアウト、formrun、React / Next.js、診断・計測の再利用手順を集約
+
+### Changed
+
+- `lessons.md` を案件固有の実測・事故・製品判断の記録へスリム化し、共通ノウハウを本則と `recipes.md` へ昇格
+- lessons の記録ルールを改訂し、1案件でも案件非依存が明白な外部仕様・FW 挙動・実装パターンは即昇格する基準を追加
+- `SKILL.md` §2.5 に SCF 定義の WXR 復元、§4 に粒状画像の lossless 判定、§5 に microCMS のプラン・API 制約と表示順、§6 / §6.5 にレシピ転記・sandbox 往復・動き系の実機レビューを追加
+
 ## [0.5.0] - 2026-07-26
 
 ### Added

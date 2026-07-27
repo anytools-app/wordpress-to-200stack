@@ -59,6 +59,7 @@ site/ の Next.js(静的エクスポート)に <route パターン> の表示テ
 - スクショ: _scratch/archive/pages/<page>/desktop.png / mobile.png
 - HTML: _scratch/archive/pages/<page>/page.html(class 構成・マークアップの参考)
 - データ: サンプル入稿済み microCMS の api=<api> レコード(フィールドは mapping.config.ts 参照)
+- **対象に関連する `recipes.md` のレシピをここへ本文ごと転記する**(リンクだけにしない — 委任先はリポジトリ外を読めない前提)
 
 ## 実装
 - `site/src/app/<surface>/page.tsx`(一覧)、`site/src/app/<surface>/[id]/page.tsx`(詳細)、
@@ -105,6 +106,7 @@ site/ の Next.js(静的エクスポート)に <route パターン> の表示テ
 参照素材:
 - スクショ: _scratch/archive/pages/<page>/desktop.png / mobile.png
 - HTML: _scratch/archive/pages/<page>/page.html(文言・リンク・画像・構造の参考のみ)
+- **対象に関連する `recipes.md` のレシピをここへ本文ごと転記する**(リンクだけにしない — 委任先はリポジトリ外を読めない前提)
 
 ## 実装
 - `site/src/app/<route>/page.tsx`、`page.module.css`、ページ固有の `metadata` を実装する

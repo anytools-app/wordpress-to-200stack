@@ -66,15 +66,21 @@ npm run wpkit -- analyze <export.xml> -o ../_scratch/analysis
 ```
 
 - `census.md` で移行スコープをユーザーに確認する(どの post_type を移行/廃止するか、捨てる URL は 404 か 301 か)
-- microCMS の API 数はプラン上限から逆算(Hobby 5 / Team 10。原典 2026-07 確認済み)。少数件の型は kind 統合
+- microCMS の API 数は §5 のプラン上限から逆算する。少数件の型は kind 統合
 - config の書式・型の決め方チェックリストは `templates.md`。**フィールド型は必ずサンプル実値で決める**:
   SCF 画像フィールドは attachment の wp_id が入る(`type:"image"` で kit が URL 解決)、wp_id 参照は relation、
   "0"/"1" は boolean、価格は単位に注意(万円単位の実例あり)
 - microCMS 対象の記事本文は `legacyBodyHtml`(HTML文字列)。リッチエディタに入れない
 
-### 2.5 現行管理画面のフィールド精査(閲覧のみ・人が画面を開く)
+### 2.5 SCF 定義の復元と現行管理画面のフィールド精査
 
-WXR/analyze から起こした config は、フィールドの**表示ラベル・表示順・入力ガイド・登録済みタクソノミー**を持たない(WXR にあるのは meta_key と値だけ)。これらの正本は**現行 WordPress の投稿編集画面**にしかないため、schema を現行に合わせるにはここを精査する。
+**SCF 案件ではまず `wpkit analyze` の `_scratch/analysis/scf-definitions.json` を見る。**
+SCF のフィールド定義(表示ラベル・表示順・入力ガイド・選択肢・repeat 指定)は WXR 内の
+`smart-cf-setting`(PHP シリアライズ)に丸ごと入っており、管理画面巡回をほぼ省略できる。
+draft の SCF 投稿に設定が無いという警告は正常。
+
+WXR から復元できない情報が残る場合(SCF 以外のフィールド機構、登録済みの空タクソノミー等)だけ、
+現行 WordPress の投稿編集画面を精査する。
 
 - **人(オペレーター)が各 post_type の投稿編集画面をブラウザで1つずつ開く**。AI 側から自動で本番を巡回しない(「原点サーバー保護」。編集画面は画像・アセットを読むため、人が開いた1ページだけを読むのが最小負荷)。
 - AI は**閲覧のみ**でページを読む(ブラウザの get_page_text 等)。**編集フォームなので、入力・保存・クリックなど状態を変える操作は絶対に行わない。**
@@ -123,7 +129,7 @@ uploads(記事に紐づく画像)は本文 HTML 内の参照も含めて microCM
    Turbopack ビルドが 27s→795s(29倍)になり、CMS webhook 再ビルド運用と両立しない
 2. **microCMS 添付 + 画像 API 配信**(`/wp-content/uploads/` の記事画像すべて: 画像フィールドも
    本文 HTML 内参照も)。`wpkit media upload`(`--scope fields|body|all`)でメディアアップロード API
-   (**Team プラン以上・1ファイル5MB**、超過分は upload が自動縮小)へ冪等アップロードし、
+   (利用条件は §5 の制約表。超過分は upload が自動縮小)へ冪等アップロードし、
    `import --media-map` が画像フィールド値と本文 `src/srcset` を asset URL へ差し替える。
    配信 URL に `?fm=webp&q=75`(+表示幅×2 の `w`)を必ず付ける(`auto=format` 非対応なので明示指定。
    本文分はテンプレの `rewriteBodyMedia()` が付与)。テーマ資産のハッシュ化は `media transform-static`
@@ -143,6 +149,8 @@ npm run wpkit -- media transform --ir ../_scratch/ir --cache ../_scratch/remote-
 - サイト側はテンプレの `src/lib/media.ts`(`mediaUrl()` / `rewriteBodyMedia()`)が manifest を引いて
   ローカル webp / microCMS 画像 API パラメータに解決する。**画像の src と転送量だけを変え、
   レンダリング寸法は 1px も変えない**(fidelity 承認を壊さない)
+- **ノイズ / グレイン系テクスチャは非可逆 webp にしない**。実測では q75 で決定的に劣化しても
+  min / max では検出できなかった。隣接画素差の平均で原本と比較し、差が潰れる資産は lossless webp へ切り替える
 - `media pull` / `media push`(S3 互換)は外部ストレージが指定された例外案件向けに残置
 - 見落としがちな回収物: テーマ外の `/docs/*.pdf` 等の添付、ページ限定 CSS(archive 全ページの
   `link[rel=stylesheet]` を集計してから回収リストを作る)、`srcset` の 1x/2x 画像と `@2x` テーマ資産。
@@ -157,28 +165,41 @@ npm run wpkit -- schema gen --config ../mapping.config.ts -o ../_scratch/microcm
 npm run wpkit -- import --ir ../_scratch/ir --dry-run   # oversized 0 を確認 → 本実行
 ```
 
+#### microCMS のプラン・API 制約(2026-07 実測)
+
+| 項目 | 制約 / 運用 |
+|---|---|
+| Hobby | 5 API。転送量20GB/月を超えるとコンテンツ API ごと翌月1日まで停止する。画像配信も CDN ヒット込みで計上される |
+| Team | 10 API。API グループは最大10 |
+| メディアアップロード API | Team 以上、5MB/file、1req 1file |
+| Content API | WRITE 5回/秒、1コンテンツ約200KB、POST / PUT 約300KB、GET 60回/秒 |
+| Management API | 10回/10秒 |
+| 下書き作成 | API から作成できない。`?status=draft` は無視され公開で作成される。非公開レコードは「公開入稿 → 管理画面で下書きへ戻す」を人手手順にする |
+| コンテンツモデル作成 | API 作成の管理 API は無い。API 作成 + スキーマ JSON インポートは管理画面の人手作業なので、計画の最初にユーザー作業として切り出す |
+| select | 単一選択でも配列で送受信する |
+| number | 非数値文字列と空文字を送らない。入稿前に警告付きで drop し、400 の原因調査ではレスポンス本文を確認する |
+| contentId | `^[a-z0-9_-]+$`。不適合の旧 ID は自動採番し、旧 URL は 301 で維持する |
+
 - **API は1つずつ作成して人間レビューを回す**。スキーマ JSON をインポート → 管理画面でフィールド名・説明・必須・グループを確認 → 指摘を `mapping.config.ts` に反映 → `wpkit schema gen` で再生成 → 再インポート、の順で確定する。レビュー前に全 API を一括作成しない
 - フィールドの採否は推測せず、IR の実データで決める:
   - 全件空なら作らない(`body: "none"` / `seoFields: "none"`)
   - SEO は「全件空 → 作らない」「Yoast の定型値のみ → CMS に作らずサイト側フォールバックで生成」「記事ごとの個別文あり → コンテンツを失わないよう維持」の3分岐で判断する
   - サイトが読まず、URL 台帳など別の正本で代替される未使用フィールドは廃止する
 - `requiredFields` は、**全件が値を持ち、欠けると表示が壊れるフィールドだけ**に指定する。1件でも欠けるフィールドは例外運用(価格未定など)を確認し、必須にしない
-- **並び順の正本は archive の実描画順であって、テーマの `orderby` ではない**。`pre_get_posts` で
-  `menu_order` を強制する並び替えプラグインが入っていることがあり、テーマ PHP を読むと逆の結論になる
-  (実案件でこれを根拠にした指摘が2件とも誤報だった)。判定手順は、archive のカードの並びと
-  WXR の `wp:menu_order` 昇順・公開日降順をそれぞれ突き合わせ、一致する方を採る
+- **WP 側の実描画順は `menu_order` 昇順のことが多い**(2案件連続の実測)。並び替えプラグインが
+  `pre_get_posts` で `get_posts()` を含む全クエリへ作用する例があるため、テーマ PHP の `orderby`
+  だけで判断しない。一覧・ページ送り・トップ・関連ブロック等の全サーフェスで archive の実描画順と
+  WXR の `wp:menu_order` 昇順・公開日降順を突き合わせ、一致する方を正本として確定する
   - `menu_order` 由来だった場合は `wp:menu_order` を疑似 metaKey として取り込める(kit の parse が対応)。
     案件側で別途 JSON を静的抽出する手間を増やさない
 - 公開日順で足りる場合は表示順専用の数値フィールドを作らず、microCMS コンテンツ一覧のドラッグ並び順を正とする。`orders` 未指定時は管理画面順で取得され、新規コンテンツは先頭に入るため、初期移行は希望表示順の逆から作成し、サイトは取得配列順で表示する
 - スキーマインポート後、**relation の参照先 API**と**repeater / カスタムフィールドの紐付け**を管理画面で手動設定する。JSON だけでは復元されないため、API ごとのチェックリストに含める
 - mapping から廃止したフィールドは、入稿前に IR の `documents.ndjson` の `fields` からも削除する。スキーマにないキーを送ると `unexpected key` の 400 になる
 - 全件入稿の前に各 API から5〜10件をサンプル入稿して人間確認する。公開状態・売約状態・グループ有無などの表示バリエーションを含め、relation の参照先は入稿済みサンプル内に閉じるよう選ぶ(未存在参照への relation PATCH は失敗する)
-- Team 以上では API グループ機能(最大10グループ)を使い、商品系・記事系・会社／人など用途別に整理する
-- WRITE 5回/秒・1コンテンツ約200KB(kit がレート制御・超過スキップを実装済み)
+- Team 以上では API グループを使い、商品系・記事系・会社／人など用途別に整理する
 - 入稿後の totalCount 照合が期待件数と一致すること。`--only` / `--source-id` で部分再実行可
 - **画像フィールドへ `null` / `undefined` を送らない**。実測では `null` が 400 ではなく 504 を起こした。kit の import は送信前のペイロード正規化・空キー除去で対処する
 - **PUT は新規作成専用、既存 contentId は PATCH**。再実行は already exists を検知して PATCH へ切り替える
-- **contentId は `^[a-z0-9_-]+$`**。適合しない旧 ID は microCMS の自動採番を使い、旧 URL は `routing-config.jsonc` の 301 で維持する
 - **書込み API の無応答ハングと間欠 504**を前提に、AbortController 60秒 + 5xx 指数バックオフを入れる
 - **メディアは拡張子由来の Content-Type 必須**。`application/octet-stream` は画像でなくファイル扱いになり、画像フィールドで参照できない
 - **入稿プロセスは同時1つ**。新規 PUT・自動採番を並走させない
@@ -186,7 +207,7 @@ npm run wpkit -- import --ir ../_scratch/ir --dry-run   # oversized 0 を確認 
 
 ### 6. ネイティブ実装(デフォルト成果物)
 
-`cp -R kit/templates/next-app <案件>/site` で展開し、**サンプル入稿済みの microCMS 直取得で実装する**。ゲート3は実装の前提であり、前段データ生成やテーマ互換の中間機構を作らない。
+`cp -R kit/templates/next-app <案件>/site` で展開し、**サンプル入稿済みの microCMS 直取得で実装する**。ゲート3は実装の前提であり、前段データ生成やテーマ互換の中間機構を作らない。実装・診断の定石は `recipes.md` を参照する。
 
 #### 成果物の姿
 
@@ -283,6 +304,9 @@ export function SiteLink({ href, ...props }: ComponentPropsWithoutRef<"a">) {
 2. jQuery プラグイン(imgLiquid / slick / lity)の見た目は CSS + React で代替する。カルーセルは scroll-snap 等を使い、旧ライブラリやテーマ CSS を持ち込まない
 3. 原文の DOM 順・視覚順を尊重する。float 回り込み等の診断に有効だが、構造の完全一致は要求しない
 4. フォームは formrun の action・input name を原文と完全一致させる
+5. 対象ページ・部品に関係する `recipes.md` のレシピを指示書へ本文ごと転記する。リンクだけにしない
+6. Codex sandbox は 127.0.0.1 への listen も不可(`listen EPERM`)。ローカルサーバーが必要な
+   ピクセル比較・DOM 実測は司令塔が実行し、差分を委任先へ戻す往復にする
 
 レビューは司令塔が typecheck / build / Playwright の desktop・mobile 実画面比較で行う。
 
@@ -296,8 +320,15 @@ export function SiteLink({ href, ...props }: ComponentPropsWithoutRef<"a">) {
 
 - `fidelity-scan.mjs` で凍結スクショと新実装を surface ごとに比較し、`fidelity-report.mjs` でワーストを出す。移行証跡として残す
 - ratio は run 間で ±0.08 ぶれる。A/B は同一セッション連続 run で行い、決定的判定はブロック単位の DOM 実測(y/height の `dy=0` / `dh=0`)
+- 粒状背景のサイトでは、1px の高さズレ以降で背景ノイズが総崩れするため不一致率を進捗指標にしない。
+  `heightDelta=0` までは比率を見ず、背景だけの帯の差分率と「ズレが始まる y 座標」で追い込む
 - reducedMotion をエミュレートし、自動送り UI は `prefers-reduced-motion: reduce` で停止する
 - 意図的差分と承認結果は approvals 台帳へ記録する
+- スクリーンショットには合成レイヤー由来の寸法アーティファクトが混じり得る。
+  `getBoundingClientRect()` + CDP matched rules を判定の正とする
+- **全ゲート通過後、動き系を実機で人が触るレビューを必須にする**。スクロール連動・SDK 初期化・
+  ホバー演出を確認し、指摘は Playwright の行動シナリオ(スクロール→computed、空送信→エラー、
+  遷移→プリフィル)へ機械化する。実測では収束・全ゲート通過後に9件の指摘が出た
 
 #### pixel-gate: 変更前後の自ビルド比較
 
@@ -309,7 +340,7 @@ export function SiteLink({ href, ...props }: ComponentPropsWithoutRef<"a">) {
 - 全外部画像を block すると microCMS 画像が空箱になる。実画像比較は「自社配信のみ許可」の特別キャプチャで新旧ビルドをクロス比較する
 - スピナー等の既知ノイズは台帳化し、未知差分と分ける
 
-差分の切り分けは、①scan の高さΔ → ②帯域別 pixelmatch → ③ブロック walk → ④CDP `CSS.getMatchedStylesForNode` の順で行う。CSS の勝者特定は grep より CDP を正とする。
+差分の切り分けと CSS 勝者の特定は `recipes.md` §5 の診断手順を使う。
 
 ### 6.6 原文テンプレとの突き合わせ(ゲート3.5。ピクセル比較では絶対に見つからない)
 
@@ -424,4 +455,5 @@ fixture は原文から作った期待値であり、**承認付き更新のみ*
 
 - 実装委任・レビュー・委任ログは delegate スキルの規約に従う(このスキルは何を委任するかの分割と品質ゲートを規定する)
 - kit に案件固有ロジックを入れない。案件差は mapping.config と site/ 側で吸収
-- 案件で得た WXR・プラグイン固有の癖・事故はこのスキルの `lessons.md` に1行追記する(このリポジトリは非公開なので案件名・実測値を書いてよい)。複数案件で再現した知見は `SKILL.md` / `design.md` へ昇格させ、認証情報・個人情報・`_scratch/` の生成物は書かない
+- 案件へピン留めした kit からスキルへ変更を還元するときは、委任先が変更したファイルだけを列挙してコピーする。古いスナップショットを `rsync` で一括同期せず、反映後に `git diff --stat` で対象を照合する
+- 案件で得た WXR・プラグイン固有の癖・事故はこのスキルの `lessons.md` に1行追記する(このリポジトリは非公開なので案件名・実測値を書いてよい)。複数案件で再現した知見に加え、1案件でも案件非依存が明白な外部仕様・FW 挙動・実装パターンは待たずに `SKILL.md` / `design.md` / `recipes.md` へ昇格し、`lessons.md` には案件固有の実測値・経緯だけを残す。認証情報・個人情報・`_scratch/` の生成物は書かない

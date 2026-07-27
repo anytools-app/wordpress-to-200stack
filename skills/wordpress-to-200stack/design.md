@@ -2,7 +2,8 @@
 
 目的: WordPress サイトの静的リニューアル案件を「決定的なスクリプト群 + Claude Code スキル」で再現可能にし、
 案件あたりの人手作業を大幅に圧縮する。
-複数の実案件で得た再現性・運用負荷・障害の知見を設計へ反映する。案件固有の実測は `lessons.md` に残し、複数案件で再現したものを設計へ昇格させる。
+複数の実案件で得た再現性・運用負荷・障害の知見を設計へ反映する。案件固有の実測は `lessons.md`、
+次回そのまま使う実装・診断手順は `recipes.md`、規約・ゲートは `SKILL.md` を正とする。
 
 ## 全体アーキテクチャ
 
@@ -78,6 +79,8 @@ dev 中の microCMS 更新はサーバー再起動不要で、最大5秒後の�
   URL パターン分類(<link> の形状クラスタリング)、custom_permalink 一覧、
   SCF/ACF 定義の復元(リピータグループ構造)、post_type 別サンプル抜粋、
   本文内の iframe/script/table/外部埋め込みの統計
+- SCF の `smart-cf-setting` は PHP serialize のバイト長を保持するため、文字列化せず Buffer で復元する。
+  XML parser が CDATA の CRLF を正規化する場合は、設定値の CDATA を WXR から生抽出する
 - ここまで人の判断ゼロ。パイロット案件で手作業した分析を完全自動化する
 
 ### wpkit parse --config mapping.config.ts
@@ -86,6 +89,7 @@ dev 中の microCMS 更新はサーバー再起動不要で、最大5秒後の�
     1回だけ percent-decode + Unicode NFC 正規化、末尾スラッシュ情報を保持、衝突検査
   - **SCF/ACF リピータは同名 meta の出現順 zip 復元**。空文字も行として保持し、列数不一致は error
     (プラグイン別アダプタ: smart-custom-fields / ACF / 素の postmeta)
+  - SCF relation の値 `"0"` は未設定としてスキップし、未解決参照に数えない
   - publish のみ移行対象(draft/private は監査用に分離出力)。設定投稿(SCF定義等)は自動除外
   - microCMS へ移行する記事本文 HTML は legacyBodyHtml として保持。画像 URL・内部リンクを台帳で書き換え、
     script 除去・埋め込み(YouTube/Vimeo/Instagram/GCal)はプレースホルダー化
@@ -268,6 +272,8 @@ analyze が config の雛形(フィールド定義込み)を自動生成し、�
 - 少RAM環境は`BUILD_MEMORY_LIMIT_MB`を入口に、ビルドラッパーが起動前にheap上限を設定し、webpackへ切替え、workers / concurrencyを制約する
 - Turbopackのネイティブメモリ(実測約2.6GB)は実質制御不能。制約環境では`webpackMemoryOptimizations`を有効にする
 - Next config読込後の`NODE_OPTIONS`変更はメインプロセス自身へ効かない。必ずラッパーのspawn前に注入する
+- `output:"export"` では `--experimental-build-mode compile/generate` 分割を使わない。静的ページ生成が完了してもページ HTML が export されない挙動を実測している
+- export のバッチ数は `min(numWorkers, ceil(paths/minPagesPerWorker))` で決まり、`cpus=1` では設定だけで分割できない。`cacheMaxMemorySize:0` は補助策に留め、保持要因の除去と worker 構成を先に直す
 
 
 ## microCMS ドラフトプレビュー(デフォルト実装、2026-07 確定)
