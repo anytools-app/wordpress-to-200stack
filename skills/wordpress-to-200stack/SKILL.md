@@ -112,6 +112,11 @@ npm run wpkit -- parse --config ../mapping.config.ts -o ../_scratch/ir
 - errors(URL衝突・リピータ列数不一致・metaキー参照ミス)は必ず原因特定。warnings は監査対象
   (タクソノミーアーカイブへのリンク → 再現するか判断 / 数値変換失敗 / Yoast テンプレ変数)
 - ルート数 =「publish −(除外+SCF設定投稿)」を census と突き合わせる
+- **`page` 型の全件リストを WXR から出し、実装済みページ+301 で全カバーされることをゲートにする**。
+  archive クロール由来のページ一覧だけを実装対象にしない — フォーム送信後の thanks ページは
+  noindex(sitemap 非掲載)かつ被リンクゼロ(form.run リダイレクトでのみ到達)でクローラーに
+  構造的に不可視。実案件で thanks 7枚がこれで漏れた(検出は WXR の page 全件と `out/` の突き合わせ
+  1コマンドだった)。旧URL台帳(verify:routes)は CMS ルート由来で page 型を守らないことに注意
 - 固定ページ(通常は WordPress の `page`)は microCMS に入れない。`exclude.postTypes` で除外し、移行後も存在する URL は `linkCheck.assumeExistPostTypes` / `assumeExistPaths` に登録する。提供は App Router の専用ルート(`src/app/<route>/page.tsx` + `page.module.css` + `metadata`)としてコード実装する
 
 ### 4. media(ゲート2: missing を人が確認)
