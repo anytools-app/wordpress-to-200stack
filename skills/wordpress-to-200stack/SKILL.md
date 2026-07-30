@@ -16,14 +16,17 @@ cd <案件>/wp-static-kit && npm install && npx playwright install chromium
 
 - 生成物はすべて案件リポジトリの `_scratch/`(gitignore)に置く。/tmp に置かない
 - 実行形: `cd wp-static-kit && npm run wpkit -- <cmd>`
+- 案件ルートにコミット対象の `migration-state.json` を `npm run wpkit -- status init --dir ..` で作成し、以後は `wpkit status` で通過済み gate と次工程を確認する
+- 台帳がある案件では後段コマンドの前提を強制する。緊急時だけ `--force` で上書き実行でき、その記録は台帳へ残る(台帳がない既存案件の挙動は変わらない)
+- `status` / `status approve` / 後段コマンドは `wp-static-kit` から案件ルートの台帳を上方探索するため、追加の `--dir` 指定は不要
 
 ## 全体フロー(ゲート順)
 
 ```
-0. archive(現行凍結)→ 1. analyze → 2. mapping config(製品判断)→ 3. parse(ゲート1)
-→ 4. media(ゲート2)→ 5. schema gen → microCMS作成 → import(ゲート3。実装の前提)
-→ 6. next-app 展開 → ネイティブ実装ループ(ピクセル比較)→ 7. verify スイート(ゲート4)
-→ 8. 200stack 公開
+0. archive(`archive`: 現行凍結)→ 1. analyze(`analyze`) → 2. mapping config(`mapping`: 製品判断)→ 2.5 SCF(`scf-fields`) → 3. parse(`parse`: ゲート1)
+→ 4. media(`media`: ゲート2)→ 5. schema gen → microCMS作成 → import(`schema-import`: ゲート3。実装の前提)
+→ 6. next-app 展開・実装(`implement`) → fidelity(`fidelity`) → 原文突き合わせ(`theme-crosscheck`) → 7. verify / scorecard(`verify`: ゲート4)
+→ 8. 200stack 公開(`publish`)
 ```
 
 ### 0. 現行サイトの凍結(最初に必ず)
@@ -60,6 +63,8 @@ npm run wpkit -- archive <https://origin> -o ../_scratch/archive   # まず --li
   フォント CDN 含む全外部リクエストをキャッシュ経由にする(副次効果: スクショが決定的になる)
 
 ### 1. analyze → 2. mapping config(製品判断)
+
+承認記録: `wpkit status approve mapping --by <名前>`
 
 ```bash
 npm run wpkit -- analyze <export.xml> -o ../_scratch/analysis
@@ -121,6 +126,8 @@ npm run wpkit -- parse --config ../mapping.config.ts -o ../_scratch/ir
 
 ### 4. media(ゲート2: missing を人が確認)
 
+承認記録: `wpkit status approve media --by <名前>`
+
 **画像の配信方針(全案件共通)**: 外部ストレージ(R2 等)は使わない。画像は次の二本立てにする。
 uploads(記事に紐づく画像)は本文 HTML 内の参照も含めて microCMS 側、サイト同梱はテーマ資産だけが原則。
 
@@ -163,6 +170,8 @@ npm run wpkit -- media transform --ir ../_scratch/ir --cache ../_scratch/remote-
   `srcset` 候補を抽出し、fetch-once の枠内で未回収の 2x 資産を補完する
 
 ### 5. microCMS(ゲート3: 件数照合)
+
+承認記録: `wpkit status approve schema-import --by <名前>`
 
 ```bash
 npm run wpkit -- schema gen --config ../mapping.config.ts -o ../_scratch/microcms-schema
@@ -319,6 +328,8 @@ export function SiteLink({ href, ...props }: ComponentPropsWithoutRef<"a">) {
 
 ### 6.5 fidelity(原文比較)と pixel-gate(退行検知)
 
+承認記録: `wpkit status approve fidelity --by <名前>`
+
 忠実性の完了条件は**原文とのピクセル比較の収束 + 機能一致**。用途の異なる2本を混同しない。
 
 #### fidelity: 原文アーカイブとの比較
@@ -349,6 +360,8 @@ export function SiteLink({ href, ...props }: ComponentPropsWithoutRef<"a">) {
 差分の切り分けと CSS 勝者の特定は `recipes.md` §5 の診断手順を使う。
 
 ### 6.6 原文テンプレとの突き合わせ(ゲート3.5。ピクセル比較では絶対に見つからない)
+
+承認記録: `wpkit status approve theme-crosscheck --by <名前>`
 
 ピクセル比較が保証するのは「**サンプル時点で発火した分岐**の見た目」だけで、発火しなかった分岐は
 存在ごと見えない。§0 で凍結したテーマ一式を読み、実装と突き合わせる。実案件ではこの工程を後から
@@ -409,12 +422,16 @@ npm run wpkit -- scorecard --config ../scorecard.config.json
 
 `scorecard` は既存の verify スクリプトや `wpkit verify` の結果、承認台帳を**集約・裁定するだけ**で、検証ロジックを再実装しない。command ゲートは毎回実行して鮮度を保証し、必須ゲートの未実施は `NOT_RUN` として総合 `FAIL` にする。ゲート4の合否は `scorecard.md` / `scorecard.json` の総合判定で機械判定する。基準を外す・緩める編集は案件側の config diff に残る。
 
+`status` の `verify` gate は既存の `scorecard.json` の総合 `PASS` を evidence として読むだけで、scorecard を再実行しない。
+
 **基準ref方式のゲート(正規化HTML全文比較)を置く場合の運用**: 意図的な DOM 差分を出す変更のたびに
 基準 ref を前進させる必要がある。**2コミット制**にする — ①実装(+差分の根拠をコミットメッセージへ)
 → ②基準 ref を①へ進める**機械コミット**。台帳や ref を手で書き換えてゲートを黙らせない。
 実案件では1セッションで5回前進した(そのたびに何が変わったかがコミット履歴に残る)。
 
 ### 8. 200stack 公開
+
+承認記録: `wpkit status approve publish --by <名前>`
 
 1. `scorecard.md` の総合 PASS を確認してから公開する(ゲート1〜4を通過済みであること)。A/B 比較中は microCMS 入稿を止める。ビルドごとに live 取得するため、比較中の入稿は差分へ混入する
 2. `routing-config.jsonc` を旧URL301の正本として確定する。200stack が適用し、凍結・手編集する。`verify:routes` で `out/` の実在パスとの全カバー・重複0を担保する

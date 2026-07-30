@@ -94,6 +94,12 @@ dev 中の microCMS 更新はサーバー再起動不要で、最大5秒後の�
 { "a11y": { "date": "2026-07-28", "by": "名前", "values": { "violations": 0 }, "note": "任意" }, "lighthouse": { "date": "...", "by": "...", "values": {} } }
 ```
 
+### status: 移行進行台帳と工程ナビゲーション
+
+`wpkit status` は案件ルートでコミットする `migration-state.json` を読み、固定順の移行 gate を工程表と次工程として示す。machine gate は台帳の自己申告でなく成果物(evidence)から毎回導出し、approval gate だけを `wpkit status approve <gate> --by <名前>` の記録で通過させる。成果物が記録より新しい場合は stale として再確認を促す。台帳は開始ディレクトリから親へ探索し、`.git` のあるリポジトリ境界を検査後に探索を打ち切る。
+
+これは scorecard を重ねて集約する仕組みではない。`verify` gate は既存 scorecard の総合 `PASS` と build hash を evidence として参照するだけで、検証を再実行しない。台帳が存在する案件に限り、media upload / import / verify / scorecard は前提 gate を CLI 層で強制する。既存案件は台帳を作るまで完全に opt-in であり、例外実行は `--force` と台帳記録を必要とする。
+
 ## CLI コマンド設計(すべて冪等・再実行可能)
 
 ### wpkit analyze <wxr.xml>

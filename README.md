@@ -17,6 +17,7 @@ WXR(WordPress エクスポート XML)の分析から公開までを、ゲート�
 ```
 
 - **決定的な処理は `wpkit`**: WXR 解析、画像移行、microCMS スキーマ生成・冪等入稿、新旧照合
+- **進行台帳は `wpkit status`**: 案件ルートの `migration-state.json` から gate 通過・人の承認・次工程を表示し、台帳を導入した案件だけ後段の前提を強制
 - **判断はスキル(司令塔)**: 移行スコープ・フィールド型・404/301 の裁定などの製品判断はユーザーに確認
 - **成果物は straight-to-final**: 固定ページは`src/app/<page>/page.tsx`、CMS記事は一覧+`[id]`+`src/templates/`、全てCSS Modules。内部リンクはSiteLink(`next/link`)、フォームはformrun
 - **記事テンプレと固定ページの実装は Codex へ委任**(委任規約は別リポジトリの [delegate](https://github.com/anytools-app/anytools-agent-skills/blob/main/skills/delegate/README.ja.md) スキル)

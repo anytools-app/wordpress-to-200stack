@@ -3,6 +3,13 @@
 All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.9.0] - 2026-07-30
+
+### Added
+
+- 案件ルートの `migration-state.json` を evidence-first で読む `wpkit status` / `status init` / `status approve`、工程ナビゲーション、承認・強制実行の記録を追加
+- 台帳を導入した案件だけ、`media upload` / `import` / `verify` / `scorecard` の前提 gate を強制し、例外時は `--force` として記録する opt-in 運用を追加
+
 ## [0.8.0] - 2026-07-30
 
 ### Added

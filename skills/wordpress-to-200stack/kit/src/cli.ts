@@ -15,6 +15,7 @@ import { importDocuments } from "./microcms/import.js";
 import { writeSchemas } from "./microcms/schema.js";
 import { loadMigrationConfig, parseConfigFile } from "./parse/index.js";
 import { initScorecardConfig, runScorecard } from "./scorecard/index.js";
+import { approveStatusGate, enforceGate, getStatus, initStatus, renderStatus } from "./status/index.js";
 import { verifySite } from "./verify/index.js";
 
 const program = new Command();
@@ -37,6 +38,14 @@ const pacingProgress = (command: string) => (stats: { intervalMs: number; concur
   const baseline = stats.baselineMs === undefined ? "pending" : `${Math.round(stats.baselineMs)}ms`;
   console.error(`${command} pacing: interval=${stats.intervalMs}ms concurrency=${stats.concurrency} baseline=${baseline}`);
 };
+async function requireGate(command: "media-upload" | "import" | "verify" | "scorecard", force?: boolean): Promise<boolean> {
+  const result = await enforceGate(command, { force });
+  if (result.allowed) return true;
+  console.error(`前提 gate が未通過です: ${result.missing.join(", ")}`);
+  for (const next of result.commands) console.error(`通過するには: ${next}`);
+  process.exitCode = 1;
+  return false;
+}
 
 program
   .name("wpkit")
@@ -55,6 +64,38 @@ program
       warnings: result.warnings.length,
       outDir: options.outDir,
     }));
+  });
+
+const status = program.command("status").description("migration state ledger and next-step navigation");
+status
+  .option("--dir <path>", "project directory", process.cwd())
+  .option("--json", "emit one machine-readable JSON document")
+  .action(async (options: { dir: string; json?: boolean }) => {
+    const result = await getStatus({ cwd: options.dir });
+    if (!result) { console.log("台帳がありません。`wpkit status init` で作成してください"); return; }
+    if (options.json) { console.log(JSON.stringify(result)); return; }
+    console.log(renderStatus(result));
+  });
+status
+  .command("init")
+  .option("--dir <path>", "project directory", process.cwd())
+  .option("--force", "overwrite an existing migration-state.json")
+  .action(async (options: { dir: string; force?: boolean }) => {
+    // Commander stores a child `--dir` value on this parent while the child has the same option name.
+    const result = await initStatus({ cwd: status.opts<{ dir: string }>().dir, force: options.force });
+    if (result.prefilled.length) console.error("プリフィルは推定。`wpkit status` で確認を");
+    console.log(JSON.stringify({ path: result.path, prefilled: result.prefilled }));
+  });
+status
+  .command("approve <gate>")
+  .requiredOption("--by <name>", "approver name")
+  .option("--note <oneLine>", "approval note")
+  .option("--dir <path>", "project directory", process.cwd())
+  .action(async (gate: string, options: { by: string; note?: string; dir: string }) => {
+    // Keep this aligned with `status init`; see the parent option resolution above.
+    const result = await approveStatusGate({ gate, by: options.by, note: options.note, cwd: status.opts<{ dir: string }>().dir });
+    for (const warning of result.warnings) console.error(`status approve warning: ${warning}`);
+    console.log(JSON.stringify({ gate: result.gate, by: options.by, warnings: result.warnings.length }));
   });
 
 program
@@ -137,7 +178,9 @@ media
   .option("--scope <scope>", "upload scope: fields, body, or all", "all")
   .option("--limit <count>", "process only the first N URLs", count)
   .option("--dry-run", "inspect cache-backed upload candidates without requesting microCMS")
-  .action(async (options: { ir: string; cache: string; config: string; map: string; only?: string; scope: "fields" | "body" | "all"; limit?: number; dryRun?: boolean }) => {
+  .option("--force", "run even when migration status prerequisites are incomplete")
+  .action(async (options: { ir: string; cache: string; config: string; map: string; only?: string; scope: "fields" | "body" | "all"; limit?: number; dryRun?: boolean; force?: boolean }) => {
+    if (!await requireGate("media-upload", options.force)) return;
     if (!["fields", "body", "all"].includes(options.scope)) throw new Error(`scope は fields, body, all のいずれかです: ${options.scope}`);
     const config = (await loadMigrationConfig(options.config)).config;
     const result = await uploadMedia({ irDir: options.ir, cacheDir: options.cache, config, mapPath: options.map, only: options.only, scope: options.scope, limit: options.limit, dryRun: options.dryRun });
@@ -165,7 +208,9 @@ program
   .option("--source-id <wpId>", "import only one WordPress source ID", positiveCount)
   .option("--dry-run", "show counts without sending requests")
   .option("--concurrency <count>", "parallel request preparation", positiveCount, 1)
-  .action(async (options: { ir: string; config?: string; mediaMap?: string; only?: string; sourceId?: number; dryRun?: boolean; concurrency: number }) => {
+  .option("--force", "run even when migration status prerequisites are incomplete")
+  .action(async (options: { ir: string; config?: string; mediaMap?: string; only?: string; sourceId?: number; dryRun?: boolean; concurrency: number; force?: boolean }) => {
+    if (!await requireGate("import", options.force)) return;
     const config = options.config ? (await loadMigrationConfig(options.config)).config : undefined;
     const result = await importDocuments({ irDir: options.ir, config, mediaMapPath: options.mediaMap, only: options.only, sourceId: options.sourceId, dryRun: options.dryRun, concurrency: options.concurrency });
     console.log(JSON.stringify(result));
@@ -215,7 +260,9 @@ program
     return parsed;
   }, 0.02)
   .option("--limit <count>", "verify only the first N old URLs", count)
-  .action(async (options: { old: string; new: string; outDir: string; screenshots?: boolean; threshold: number; limit?: number }) => {
+  .option("--force", "run even when migration status prerequisites are incomplete")
+  .action(async (options: { old: string; new: string; outDir: string; screenshots?: boolean; threshold: number; limit?: number; force?: boolean }) => {
+    if (!await requireGate("verify", options.force)) return;
     const result = await verifySite({ oldDir: options.old, newTarget: options.new, reportDir: options.outDir, screenshots: options.screenshots, threshold: options.threshold, limit: options.limit });
     console.log(JSON.stringify({ checked: result.checked, missing: result.missing.length, metaMismatches: result.metaMismatches.length, brokenLinks: result.brokenLinks.length, screenshotDiffs: result.screenshotDiffs.length, reportDir: result.reportDir }));
     if (result.missing.length > 0) process.exitCode = 1;
@@ -225,7 +272,9 @@ const scorecard = program.command("scorecard").description("aggregate migration 
 scorecard
   .option("--config <path>", "scorecard.config.json path")
   .option("-o, --out-dir <outDir>", "scorecard report output directory")
-  .action(async (options: { config: string; outDir?: string }) => {
+  .option("--force", "run even when migration status prerequisites are incomplete")
+  .action(async (options: { config: string; outDir?: string; force?: boolean }) => {
+    if (!await requireGate("scorecard", options.force)) return;
     if (!options.config) throw new Error("scorecard の実行には --config <path> が必要です");
     const result = await runScorecard({ configPath: options.config, outDir: options.outDir });
     const counts = result.gates.reduce((summary, gate) => {

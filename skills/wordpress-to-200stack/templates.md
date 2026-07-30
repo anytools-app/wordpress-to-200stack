@@ -136,16 +136,16 @@ site/ の Next.js(静的エクスポート)に <route パターン> の表示テ
 
 ## 切替チェックリスト(コピーして案件 issue に)
 
-- [ ] コンテンツ凍結の合意(日時)
-- [ ] 最終 WXR で analyze→parse→import 差分実行(**本文の `wpautop` 適用と `<br>` 数の整合を確認**)
-- [ ] 原文テンプレとの突き合わせ(§6.6)を全テンプレで完了。クエリ条件・表示分岐・enqueue JS の3観点
+- [ ] コンテンツ凍結の合意(日時、`archive` gate)
+- [ ] 最終 WXR で analyze→parse→import 差分実行(`mapping` / `schema-import` を `wpkit status approve ...` で記録。**本文の `wpautop` 適用と `<br>` 数の整合を確認**)
+- [ ] 原文テンプレとの突き合わせ(§6.6)を全テンプレで完了(`theme-crosscheck` を承認)。クエリ条件・表示分岐・enqueue JS の3観点
 - [ ] axe-core で本番アーカイブとの差分ゼロ(移行で増やした違反が無い)
-- [ ] uploadsはmicroCMSメディア、テーマ資産はwebp同梱の二本立てを最終確認
+- [ ] uploadsはmicroCMSメディア、テーマ資産はwebp同梱の二本立てを最終確認(`media` を承認)
 - [ ] 固定ページの `srcset` 1x/2x と `@2x` 資産を照合し、DPR 1 の archive で未回収の候補を fetch-once で補完
-- [ ] verify(スクショ込み)エラー0・差分トリアージ済み
-- [ ] scorecard 総合 PASS(`scorecard.md` を issue に添付)
+- [ ] verify(スクショ込み)エラー0・差分トリアージ済み(`verify` gate)
+- [ ] scorecard 総合 PASS(`verify` gate、`scorecard.md` を issue に添付)
 - [ ] `routing-config.jsonc`が旧URLを新routeまたは301で全カバーし、`out/`との重複0
 - [ ] formrunのaction・input nameを承認済みfixtureと照合
 - [ ] microCMS webhook → ビルドフック接続確認(テスト更新→自動デプロイ)
-- [ ] 本番 DNS 切替 → 404/フォーム/画像の監視
+- [ ] 本番 DNS 切替 → 404/フォーム/画像の監視(`publish` を承認)
 - [ ] 旧サーバーはリードオンリーで保持(ロールバック期限を決める)
