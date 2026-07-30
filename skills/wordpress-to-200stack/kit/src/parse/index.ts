@@ -9,6 +9,7 @@ import { defineMigration, type ApiDef, type FieldDef, type MigrationConfig } fro
 import { parseWxr, type WxrItem } from "../core/wxr.js";
 import { normalizeRoutePath, rewriteLegacyHtml, type HtmlWarning } from "./html.js";
 import { metaValues, zipRepeater } from "./repeater.js";
+import { hasBlockMarkup, wpautop } from "./wpautop.js";
 
 const DEFAULT_IFRAME_HOSTS = ["www.youtube.com", "youtube.com", "player.vimeo.com", "calendar.google.com", "www.google.com", "www.instagram.com"];
 const OEMBED_HOSTS = [
@@ -105,7 +106,7 @@ function expandOembedCache(item: WxrItem): OembedExpansion {
     if (cache.instagram) instagramEmbeds += 1;
     return cache.html;
   };
-  // WXR content may retain either WordPress' <p> wrapper or the pre-wpautop blank-line form.
+  // Expand either WordPress' <p> wrapper or the pre-wpautop blank-line form before formatting.
   let html = item.contentHtml.replace(/<p\b[^>]*>\s*(https?:\/\/[^\s<]+)\s*<\/p>/gi, (whole, url: string) => replaceUrl(url) ?? whole);
   html = html.replace(/(^|\r?\n\s*\r?\n)(\s*)(https?:\/\/[^\s<]+)(\s*)(?=\r?\n\s*\r?\n|$)/gim, (whole, before: string, leading: string, url: string, trailing: string) => {
     const replacement = replaceUrl(url);
@@ -352,8 +353,10 @@ export function parseMigration(config: MigrationConfig, xml: string): ParseResul
   const documents: LegacyDocument[] = candidates.map(({ item, api, definition }) => {
     const route = routeFor(item);
     const assets = new Set<string>();
+    const applyWpautop = definition.body !== "none" && config.wpautop !== false && !hasBlockMarkup(item.contentHtml);
     const oembed = expandOembedCache(item);
-    const htmlResult = definition.body === "none" ? { html: "", assets: [], warnings: { unresolvedInternalLinks: [], removedScripts: 0, removedIframes: [], inlineStyles: { elements: 0, properties: {} } } satisfies HtmlWarning } : rewriteLegacyHtml(oembed.html, { site: config.site, routePaths: knownRoutePaths, allowIframeHosts });
+    const bodyHtml = applyWpautop ? wpautop(oembed.html, true) : oembed.html;
+    const htmlResult = definition.body === "none" ? { html: "", assets: [], warnings: { unresolvedInternalLinks: [], removedScripts: 0, removedIframes: [], inlineStyles: { elements: 0, properties: {} } } satisfies HtmlWarning } : rewriteLegacyHtml(bodyHtml, { site: config.site, routePaths: knownRoutePaths, allowIframeHosts });
     if (htmlResult.warnings.inlineStyles.elements > 0) inlineStylePages.push({
       wpId: item.wpId,
       api,

@@ -104,15 +104,17 @@ WXR から復元できない情報が残る場合(SCF 以外のフィールド�
 npm run wpkit -- parse --config ../mapping.config.ts -o ../_scratch/ir
 ```
 
-- **本文は `wpautop` 相当を適用してから IR へ入れる(取り込み後は復元不能)**。WordPress は
+- **kit の parse は本文へ `wpautop` 相当を適用してから IR へ入れる(取り込み後は復元不能)**。WordPress は
   `wpautop()` を**表示時**に適用するため、WXR の `content:encoded` は改行だけのプレーンテキストで、
   `<p>` も `<br>` も持たない。素のまま入稿すると**改行が全部空白に潰れる**。実測で 537件中245件(46%)が
   該当し、`<br>` を含む本文は1件だけになった。数週間気づかれず、クライアントの記事が1行に潰れていた
+  - mapping.config の top-level `wpautop` は既定 `true`。`wpautop: false` で無効化できる。parse は展開前の
+    本文に既に `<p>` 構造がある場合と Gutenberg ブロックコメントを含む場合は二重適用しない
   - 変換規則は WP の `formatting.php` の `wpautop()` に合わせる(空行 → `<p>`、単独改行 → `<br />`、
     ブロック要素の前後は段落化しない)
-  - **保存先 CMS のサニタイザが落とす構造を検出して警告する**。microCMS は HTML 仕様上不正な入れ子
+  - **保存先 CMS のサニタイザが落とす構造に注意する(kit による自動検出は未実装・改善候補)**。microCMS は HTML 仕様上不正な入れ子
     (`<h2>` 内の `<p>` 等)を除去するため、wpautop の出力がそのまま保存できない記事がある(実測67件)。
-    落ちると見出しの中身が丸ごと見出しサイズで出る
+    落ちると見出しの中身が丸ごと見出しサイズで出る。現状は入稿後の実表示・差分確認で拾う
   - ゲート: IR の `<br>` 数が WXR の単独改行数と整合すること
 - errors(URL衝突・リピータ列数不一致・metaキー参照ミス)は必ず原因特定。warnings は監査対象
   (タクソノミーアーカイブへのリンク → 再現するか判断 / 数値変換失敗 / Yoast テンプレ変数)
@@ -144,7 +146,8 @@ uploads(記事に紐づく画像)は本文 HTML 内の参照も含めて microCM
    (利用条件は §5 の制約表。超過分は upload が自動縮小)へ冪等アップロードし、
    `import --media-map` が画像フィールド値と本文 `src/srcset` を asset URL へ差し替える。
    配信 URL に `?fm=webp&q=75`(+表示幅×2 の `w`)を必ず付ける(`auto=format` 非対応なので明示指定。
-   本文分はテンプレの `rewriteBodyMedia()` が付与)。テーマ資産のハッシュ化は `media transform-static`
+   本文分はテンプレの `rewriteBodyMedia()` が `fm` / `q` を付与し、表示幅を知る実装箇所では `mediaUrl()` の
+   `options.w` で `w` を明示指定する)。テーマ資産のハッシュ化は `media transform-static`
    (CSS 内 url() の書き換え込み)
 
 ```bash
@@ -163,6 +166,7 @@ npm run wpkit -- media transform --ir ../_scratch/ir --cache ../_scratch/remote-
   レンダリング寸法は 1px も変えない**(fidelity 承認を壊さない)
 - **ノイズ / グレイン系テクスチャは非可逆 webp にしない**。実測では q75 で決定的に劣化しても
   min / max では検出できなかった。隣接画素差の平均で原本と比較し、差が潰れる資産は lossless webp へ切り替える
+  (この比較・切替の判断は現状手動。kit transform の自動判定は未実装・改善候補)
 - `media pull` / `media push`(S3 互換)は外部ストレージが指定された例外案件向けに残置
 - 見落としがちな回収物: テーマ外の `/docs/*.pdf` 等の添付、ページ限定 CSS(archive 全ページの
   `link[rel=stylesheet]` を集計してから回収リストを作る)、`srcset` の 1x/2x 画像と `@2x` テーマ資産。

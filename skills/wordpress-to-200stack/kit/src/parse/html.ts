@@ -27,6 +27,13 @@ function mediaUrl(url: URL, mediaHost: URL): string {
   return replacement.toString();
 }
 
+function iframeTitle(host: string): string {
+  const isVideoHost = host === "youtube.com" || host.endsWith(".youtube.com")
+    || host === "youtu.be" || host.endsWith(".youtu.be")
+    || host === "vimeo.com" || host.endsWith(".vimeo.com");
+  return isVideoHost ? "動画" : "埋め込みコンテンツ";
+}
+
 function rewriteSrcset(value: string, origin: URL, mediaHost: URL, assets: Set<string>): string {
   return value.split(",").map((candidate) => {
     const trimmed = candidate.trim();
@@ -89,7 +96,10 @@ export function rewriteLegacyHtml(html: string, context: RewriteHtmlContext): { 
     const frame = $(element);
     const source = frame.attr("src");
     const host = source ? parsedUrl(source, origin.toString())?.host.toLowerCase() : undefined;
-    if (host && context.allowIframeHosts.has(host)) frame.attr("loading", "lazy");
+    if (host && context.allowIframeHosts.has(host)) {
+      frame.attr("loading", "lazy");
+      if (!frame.attr("title")) frame.attr("title", iframeTitle(host));
+    }
     else { warnings.removedIframes.push(source ?? "(srcなし)"); frame.remove(); }
   });
   $("*").each((_, element) => {
