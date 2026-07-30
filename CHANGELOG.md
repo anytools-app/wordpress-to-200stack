@@ -3,6 +3,18 @@
 All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+
+- テンプレに決定的な dy / dh 計測器 `measure-blocks.mjs` と、選定理由を持つ `blocks.config.json` 雛形を追加
+- SKILL.md §6.5 に fidelity の定量基準、ゼロ基準、粒状背景の判定、および承認台帳の `measurements` 記録要件を追加
+
+### Changed
+
+- `recipes.md` §5 を手作業の DOM 計測から `measure-blocks.mjs` を使う手順へ更新
+- テンプレ実装指示書の検証節と設計書に、ブロック計測と承認記録の運用を追加
+
 ## [0.7.0] - 2026-07-30
 
 ### Added

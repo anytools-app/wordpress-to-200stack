@@ -324,11 +324,12 @@ export function SiteLink({ href, ...props }: ComponentPropsWithoutRef<"a">) {
 #### fidelity: 原文アーカイブとの比較
 
 - `fidelity-scan.mjs` で凍結スクショと新実装を surface ごとに比較し、`fidelity-report.mjs` でワーストを出す。移行証跡として残す
-- ratio は run 間で ±0.08 ぶれる。A/B は同一セッション連続 run で行い、決定的判定はブロック単位の DOM 実測(y/height の `dy=0` / `dh=0`)
-- 粒状背景のサイトでは、1px の高さズレ以降で背景ノイズが総崩れするため不一致率を進捗指標にしない。
-  `heightDelta=0` までは比率を見ず、背景だけの帯の差分率と「ズレが始まる y 座標」で追い込む
+- fidelity-scan の ratio は run 間で ±0.08 ぶれる相対指標であり、収束の傾向を見るために使う。A/B は同一セッション連続 run で行い、決定的判定は `node scripts/measure-blocks.mjs` によるブロック単位の DOM 実測とする
+- **必須計測ブロックを選定・固定する**。全計測ページで header / footer / breadcrumb / main コンテナ / `documentHeight` を測る。surface ごとに代表ページを1つ以上選び、原文の直下セクション単位で主要セクションも列挙する。selector 集合は案件の `blocks.config.json` に固定し、各 selector の選定理由を `reason` に残す。原文に breadcrumb が無い場合はエントリを削除し、その理由を config の `notes` に残す
+- **合格基準はゼロ基準**。必須ブロックすべてで `dy=0` かつ `dh=0` とし、desktop 1280×800 / mobile 375×812 の両 viewport で小数第2位(0.01px)まで比較する。±の許容幅は置かない。例外は `docs/fidelity-approvals.json` に登録した意図的差分だけとする
+- 粒状背景のサイトでは、1px の高さズレ以降で背景ノイズが総崩れするためピクセル比率で判定しない。`dy=0` / `dh=0` に加え、`recipes.md` §5 の帯サンプリングで背景のみの帯の差分率が 0% であることを判定する
+- 意図的差分と承認結果は `docs/fidelity-approvals.json` へ記録する。scorecard 0.7.0 の既存様式(`approvals[]` の `surface` / `date` / `by` は必須)に、各レコードで次の `measurements` を追加する: `{ "date": "計測日", "viewports": ["desktop", "mobile"], "blocks": 0, "nonZero": 0, "exceptions": [{ "block": "<id>", "viewport": "desktop", "dy": 0, "dh": 0, "reason": "..." }], "source": "_scratch/fidelity/blocks-<surface>.json" }`。`nonZero` と `exceptions` の件数が一致し、すべての非ゼロを例外として説明していることが承認の前提である。追加フィールドは既存の scorecard `fidelity-approvals` チェックと後方互換である
 - reducedMotion をエミュレートし、自動送り UI は `prefers-reduced-motion: reduce` で停止する
-- 意図的差分と承認結果は approvals 台帳へ記録する
 - スクリーンショットには合成レイヤー由来の寸法アーティファクトが混じり得る。
   `getBoundingClientRect()` + CDP matched rules を判定の正とする
 - **全ゲート通過後、動き系を実機で人が触るレビューを必須にする**。スクロール連動・SDK 初期化・

@@ -110,3 +110,21 @@ npm run wpkit -- scorecard --config ../scorecard.config.json
 
 `routing-config.jsonc` は旧 URL の301正本です。`src/data/legacy-routes.json` の全 URL が
 実出力または301先の実出力へ到達し、新ルート重複が0であることを `verify:routes` が検証します。
+
+## fidelity ブロック計測
+
+計測前に `WPKIT_ARCHIVE_DIR` と `WPKIT_ORIGIN` を設定し、`npm run build` で `out/` を作成します。
+`blocks.config.json` は案件の selector 正本です。SKILL.md §6.5 の選定規則に従って各 `PLACEHOLDER` を
+必ず実 selector へ置き換え、各エントリの `reason` を残します。
+
+```sh
+WPKIT_ARCHIVE_DIR=/absolute/path/to/archive \
+WPKIT_ORIGIN=https://example.com \
+node scripts/measure-blocks.mjs
+```
+
+`--only <surfaceId>`、`--viewport desktop|mobile`、`--port 8899`、`--strict` を必要に応じて指定できます。
+結果は `_scratch/fidelity/blocks-<surface>.json` と `.md` に出力されます。exit code は、計測完了が 0、
+config・archive・`out/`・selector・描画エラーが 1、`--strict` 時だけ非ゼロ dy / dh が残る場合が 2 です。
+JSON の `nonZero` とブロック詳細を確認し、意図的差分だけを `docs/fidelity-approvals.json` の
+`measurements` (source は生成した JSON) へ転記して承認します。承認判断そのものは人が行います。

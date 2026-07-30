@@ -229,6 +229,17 @@ analyze が config の雛形(フィールド定義込み)を自動生成し、�
 ここは AI 委任(Codex)+人間レビュー。archive のスクショ・保存 HTML は「凍結された参照資料」として
 指示書に添付するが、ランタイム入力にはしない。
 
+### fidelity の計測設計
+
+`measure-blocks.mjs` は原文と自ビルドを同一条件で描画する決定的な計測器である。原文は凍結した
+`page.html` を Playwright の文書 route fulfill で再描画し、URL 解決は実 origin 基準に保つ。サブリソースは
+fetch-once キャッシュだけから解決する。自ビルドは `serve-cached` 経由で `out/` を配信し、双方を同じ
+viewport・`reducedMotion: "reduce"`・キャッシュ interception 条件で測る。
+
+スクリーンショット ratio は run 間で揺れる相対指標であり、傾向の確認に使う。ブロックの dy / dh は
+決定的な合格判定の入力であり、`blocks-<surface>.json` は `fidelity-approvals.json` へ転記する値の出所を
+機械化する。ただし、意図的差分を承認する判断自体は人が行う。
+
 ### ネイティブページの提供設計
 
 - 固定ページは1ページずつ JSX とページローカル CSS Modules へ書き起こす。記事は一覧・詳細・テンプレの所有境界でModuleを分ける

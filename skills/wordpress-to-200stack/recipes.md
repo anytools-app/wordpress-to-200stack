@@ -48,8 +48,8 @@
 ## 5. 診断・計測の手順
 
 - DOM の正は生 HTML、見た目の正はスクリーンショット、JS 設定の正はテーマ JS と分けて読む。いずれか1つだけを原文の全てとして扱わない。(案件A)
-- 凍結した `page.html` を `file://` で開き、同梱テーマ JS をオフライン実行して JS 初期化後の実寸を測る。(案件A)
-- 同一 viewport で主要ブロックの y / height を列挙し、dy / dh を 0 へ収束させる。全ページ共通の差を系統的原因へ分解してから局所 CSS を直す。
+- 案件の `blocks.config.json` に selector と選定理由を固定し、`WPKIT_ARCHIVE_DIR=/absolute/archive WPKIT_ORIGIN=https://example.com node scripts/measure-blocks.mjs` を実行する。凍結 `page.html` は実 origin 基準で再描画され、`_scratch/fidelity/blocks-<surface>.json` / `.md` に原文・自ビルドの y / height と dy / dh が出力される。
+- 同一 viewport で出力された主要ブロックの dy / dh を 0 へ収束させる。全ページ共通の差を系統的原因へ分解してから局所 CSS を直す。
 - 差分は高さΔ、帯域別 pixelmatch、ブロック walk、CDP `CSS.getMatchedStylesForNode` の4段で切り分ける。勝者ルールの特定は grep ではなく CDP を正とする。
 - 粒状背景は本文のない背景だけの帯をサンプリングし、レイアウト差と画像変換差を分ける。(案件C)
 - ノイズ / グレイン系テクスチャの劣化は隣接画素差の平均で判定する。min / max は圧縮リンギングの外れ値を拾うため品質判定に使わない。(案件C)

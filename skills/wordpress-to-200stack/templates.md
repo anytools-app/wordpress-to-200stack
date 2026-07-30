@@ -82,6 +82,7 @@ site/ の Next.js(静的エクスポート)に <route パターン> の表示テ
 ## 検証
 - typecheck / lint / production buildが通ること
 - <代表 URL 2〜3件> についてdesktop/mobileの原文比較を行い、ピクセル差分を収束させること
+- measure-blocks の必須ブロックで dy=0 / dh=0 を確認すること(desktop / mobile 両 viewport。例外は fidelity-approvals 台帳に登録した意図的差分のみ)
 - フォームaction/name、内部/外部リンク、title/canonical/OGP/robotsを原文・台帳と照合すること
 - DOMタグ実体数カウントは構造差の診断に使ってよいが、完了条件にしない(substringはRSCペイロードで2倍に見える)
 - CSS・レイアウト変更は`css-visual-diff.mjs`のbefore/after capture→compareで退行0を確認すること
@@ -121,6 +122,7 @@ site/ の Next.js(静的エクスポート)に <route パターン> の表示テ
 ## 検証とレビュー
 - typecheck / lint / dev / production buildで対象ルートを確認する
 - desktop/mobileの実装スクショを原文スクショと並べ、差分発見→修正→再比較を収束まで繰り返す
+- measure-blocks の必須ブロックで dy=0 / dh=0 を確認する(desktop / mobile 両 viewport。例外は fidelity-approvals 台帳に登録した意図的差分のみ)
 - フォームaction/name、内部/外部リンク、title/canonical/OGP/robotsを照合する
 - DOMタグ実体数カウントは診断に使ってよいが、完了条件にしない
 - CSS・レイアウト変更はpixel-gateのbefore/after比較で退行0を確認する

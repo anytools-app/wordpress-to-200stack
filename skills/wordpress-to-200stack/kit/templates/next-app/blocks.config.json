@@ -1,0 +1,38 @@
+{
+  "common": [
+    {
+      "id": "header",
+      "selector": "PLACEHOLDER: サイトヘッダーの selector",
+      "reason": "全ページ共通の必須ブロック(SKILL §6.5 の選定規則)"
+    },
+    {
+      "id": "footer",
+      "selector": "PLACEHOLDER",
+      "reason": "全ページ共通の必須ブロック(SKILL §6.5 の選定規則)"
+    },
+    {
+      "id": "breadcrumb",
+      "selector": "PLACEHOLDER",
+      "reason": "全ページ共通の必須ブロック(SKILL §6.5 の選定規則)。原文にパンくずが無いサイトはこのエントリを削除し、削除理由を notes に残す"
+    },
+    {
+      "id": "main",
+      "selector": "PLACEHOLDER: main コンテナ",
+      "reason": "全ページ共通の必須ブロック(SKILL §6.5 の選定規則)"
+    }
+  ],
+  "surfaces": [
+    {
+      "surface": "tpl.example.detail",
+      "path": "/example/sample-page/",
+      "blocks": [
+        {
+          "id": "hero",
+          "selector": "PLACEHOLDER",
+          "reason": "原文の直下セクション単位の主要セクション(代表ページで必須)"
+        }
+      ]
+    }
+  ],
+  "notes": "実案件では PLACEHOLDER を必ず置き換える。選定規則と合格基準は SKILL.md §6.5。"
+}
