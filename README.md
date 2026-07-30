@@ -13,7 +13,7 @@ WXR(WordPress エクスポート XML)の分析から公開までを、ゲート�
 → 3. parse(ゲート1: errors 0)→ 4. media(ゲート2)
 → 5. schema gen → microCMS作成 → import(ゲート3。実装の前提)
 → 6. next-app展開 → ネイティブ実装ループ(ピクセル比較)
-→ 7. verifyスイート(ゲート4)→ 8. 200stack公開
+→ 7. verifyスイート→ scorecard集約(ゲート4)→ 8. 200stack公開
 ```
 
 - **決定的な処理は `wpkit`**: WXR 解析、画像移行、microCMS スキーマ生成・冪等入稿、新旧照合

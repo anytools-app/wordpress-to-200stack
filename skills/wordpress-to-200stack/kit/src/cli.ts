@@ -14,6 +14,7 @@ import { uploadMedia } from "./media/upload.js";
 import { importDocuments } from "./microcms/import.js";
 import { writeSchemas } from "./microcms/schema.js";
 import { loadMigrationConfig, parseConfigFile } from "./parse/index.js";
+import { initScorecardConfig, runScorecard } from "./scorecard/index.js";
 import { verifySite } from "./verify/index.js";
 
 const program = new Command();
@@ -218,6 +219,35 @@ program
     const result = await verifySite({ oldDir: options.old, newTarget: options.new, reportDir: options.outDir, screenshots: options.screenshots, threshold: options.threshold, limit: options.limit });
     console.log(JSON.stringify({ checked: result.checked, missing: result.missing.length, metaMismatches: result.metaMismatches.length, brokenLinks: result.brokenLinks.length, screenshotDiffs: result.screenshotDiffs.length, reportDir: result.reportDir }));
     if (result.missing.length > 0) process.exitCode = 1;
+  });
+
+const scorecard = program.command("scorecard").description("aggregate migration quality gates into a scorecard");
+scorecard
+  .option("--config <path>", "scorecard.config.json path")
+  .option("-o, --out-dir <outDir>", "scorecard report output directory")
+  .action(async (options: { config: string; outDir?: string }) => {
+    if (!options.config) throw new Error("scorecard の実行には --config <path> が必要です");
+    const result = await runScorecard({ configPath: options.config, outDir: options.outDir });
+    const counts = result.gates.reduce((summary, gate) => {
+      if (gate.status === "PASS") summary.pass += 1;
+      else if (gate.status === "FAIL") summary.fail += 1;
+      else if (gate.status === "ATTESTED") summary.attested += 1;
+      else summary.notRun += 1;
+      return summary;
+    }, { pass: 0, fail: 0, attested: 0, notRun: 0 });
+    console.log(JSON.stringify({ overall: result.overall, gates: counts, buildHash: result.buildHash, reportDir: result.reportDir }));
+    if (result.overall === "FAIL") process.exitCode = 1;
+  });
+
+scorecard
+  .command("init")
+  .requiredOption("--site <siteDir>", "Next.js app directory")
+  .option("--config <path>", "output scorecard.config.json path")
+  .option("--force", "overwrite an existing config")
+  .action(async (options: { site: string; config?: string; force?: boolean }) => {
+    const result = await initScorecardConfig({ siteDir: options.site, configPath: options.config, force: options.force });
+    for (const warning of result.warnings) console.error(`scorecard init warning: ${warning}`);
+    console.log(JSON.stringify({ configPath: result.configPath, gates: result.config.gates.length, warnings: result.warnings.length }));
   });
 
 program.parseAsync(process.argv).catch((error: unknown) => {

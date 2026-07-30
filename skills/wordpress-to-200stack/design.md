@@ -71,6 +71,29 @@ CSS: layout の global importを固定順にする → 各ルート/テンプレ
 
 dev 中の microCMS 更新はサーバー再起動不要で、最大5秒後のリロードで反映する。ビルド間の鮮度はビルドラッパーが fetch cache を開始時に破棄して担保する。
 
+### scorecard: 品質ゲートの集約と裁定
+
+`wpkit scorecard` は検証ロジックを再実装しない。テンプレの `scripts/verify-*.mjs`、`wpkit verify` のレポート、人の承認台帳を読み、案件ルートの宣言的な `scorecard.config.json` に照らして一枚の JSON / Markdown へ集約・裁定する。config はコミット対象であり、品質基準を外す・緩める編集を案件 diff に残す正本である。
+
+- command ゲートは過去レポートを読まず、毎回 `execFile` 形式で実行して鮮度を保証する。file ゲートは既存の結果ファイルを読む
+- fidelity / 実機レビュー / 手動計測は人の判断そのものを自動化しない。機械チェックは記録の存在・必要項目・網羅だけに限定する
+- required ゲートの `NOT_RUN` は silent skip せず総合 `FAIL` にする。`required: false` は表示するが総合判定へ影響しない
+- `out/` は相対パス順と内容ハッシュから決定的な build hash を計測し、実機レビュー台帳の対象 build と照合する。不一致は v1 では警告であり FAIL にはしない
+
+人の記録は次の JSON 形式を使う。fidelity は surface ごとに `date` と `by` を持つ承認がすべて存在すること、live review は `date` / `reviewer` / 1件以上の `ok` scenario / 解消済み findings を条件にする。attestation は対応 key の `date` と `by` があれば `ATTESTED` とする。
+
+```json
+{ "approvals": [{ "surface": "tpl.works.detail", "date": "2026-07-28", "by": "名前", "note": "任意" }] }
+```
+
+```json
+{ "date": "2026-07-28", "reviewer": "名前", "build": "out の内容ハッシュ", "scenarios": [{ "name": "フォーム送信", "result": "ok" }], "findings": [{ "summary": "確認済み", "resolved": true }] }
+```
+
+```json
+{ "a11y": { "date": "2026-07-28", "by": "名前", "values": { "violations": 0 }, "note": "任意" }, "lighthouse": { "date": "...", "by": "...", "values": {} } }
+```
+
 ## CLI コマンド設計(すべて冪等・再実行可能)
 
 ### wpkit analyze <wxr.xml>

@@ -141,6 +141,7 @@ site/ の Next.js(静的エクスポート)に <route パターン> の表示テ
 - [ ] uploadsはmicroCMSメディア、テーマ資産はwebp同梱の二本立てを最終確認
 - [ ] 固定ページの `srcset` 1x/2x と `@2x` 資産を照合し、DPR 1 の archive で未回収の候補を fetch-once で補完
 - [ ] verify(スクショ込み)エラー0・差分トリアージ済み
+- [ ] scorecard 総合 PASS(`scorecard.md` を issue に添付)
 - [ ] `routing-config.jsonc`が旧URLを新routeまたは301で全カバーし、`out/`との重複0
 - [ ] formrunのaction・input nameを承認済みfixtureと照合
 - [ ] microCMS webhook → ビルドフック接続確認(テスト更新→自動デプロイ)

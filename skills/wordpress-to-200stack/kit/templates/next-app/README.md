@@ -99,5 +99,14 @@ npm run verify:webvitals-preload
 ファイル実在を検証します。オフライン実行を前提とするため remote URL の到達性は検証せず、
 スキップしたことをレポートします。
 
+案件リポジトリのルートで scorecard の品質定義を生成・コミットし、公開前に総合判定を確認します。
+
+```sh
+npm run wpkit -- scorecard init --site ../site
+npm run wpkit -- scorecard --config ../scorecard.config.json
+```
+
+`scorecard.config.json` はコミットします。出力される `_scratch/scorecard/` は生成物のためコミットしません。
+
 `routing-config.jsonc` は旧 URL の301正本です。`src/data/legacy-routes.json` の全 URL が
 実出力または301先の実出力へ到達し、新ルート重複が0であることを `verify:routes` が検証します。

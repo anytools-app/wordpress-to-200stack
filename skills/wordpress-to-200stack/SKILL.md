@@ -397,6 +397,17 @@ missing は意図した除外だけにし、metaMismatches は0を目標にす�
 
 fixture は原文から作った期待値であり、**承認付き更新のみ**。現行出力から自動再生成する自己参照にしない。
 
+#### scorecard による集約
+
+案件リポジトリのルートへ、品質の定義である `scorecard.config.json` をコミットする。最初に既定ゲート一式を生成し、各 build/review の完了時には scorecard を実行する。
+
+```bash
+npm run wpkit -- scorecard init --site ../site
+npm run wpkit -- scorecard --config ../scorecard.config.json
+```
+
+`scorecard` は既存の verify スクリプトや `wpkit verify` の結果、承認台帳を**集約・裁定するだけ**で、検証ロジックを再実装しない。command ゲートは毎回実行して鮮度を保証し、必須ゲートの未実施は `NOT_RUN` として総合 `FAIL` にする。ゲート4の合否は `scorecard.md` / `scorecard.json` の総合判定で機械判定する。基準を外す・緩める編集は案件側の config diff に残る。
+
 **基準ref方式のゲート(正規化HTML全文比較)を置く場合の運用**: 意図的な DOM 差分を出す変更のたびに
 基準 ref を前進させる必要がある。**2コミット制**にする — ①実装(+差分の根拠をコミットメッセージへ)
 → ②基準 ref を①へ進める**機械コミット**。台帳や ref を手で書き換えてゲートを黙らせない。
@@ -404,7 +415,7 @@ fixture は原文から作った期待値であり、**承認付き更新のみ*
 
 ### 8. 200stack 公開
 
-1. ゲート1〜4を通し、A/B 比較中は microCMS 入稿を止める。ビルドごとに live 取得するため、比較中の入稿は差分へ混入する
+1. `scorecard.md` の総合 PASS を確認してから公開する(ゲート1〜4を通過済みであること)。A/B 比較中は microCMS 入稿を止める。ビルドごとに live 取得するため、比較中の入稿は差分へ混入する
 2. `routing-config.jsonc` を旧URL301の正本として確定する。200stack が適用し、凍結・手編集する。`verify:routes` で `out/` の実在パスとの全カバー・重複0を担保する
 3. 200stack でサイトを作成し、microCMS webhook → 200stack webhook 受信 API を接続する
 4. release スクリプトで検証ゲート通過を確認し、バージョン更新・タグ・pushを行う。200stack の自動デプロイを正とする

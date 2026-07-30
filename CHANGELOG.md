@@ -3,6 +3,17 @@
 All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.7.0] - 2026-07-30
+
+### Added
+
+- `wpkit scorecard` / `wpkit scorecard init` と、案件ごとにコミットする宣言的な `scorecard.config.json` を追加
+- fidelity 承認、実機レビュー、a11y / Lighthouse 手動計測を記録する `fidelity-approvals.json` / `live-review.json` / `quality-attestations.json` の様式を追加
+
+### Changed
+
+- `SKILL.md` §7 / §8、テンプレート README、切替チェックリストを、scorecard 総合 PASS を公開前提とする運用へ更新
+
 ## [0.6.0] - 2026-07-27
 
 ### Added
