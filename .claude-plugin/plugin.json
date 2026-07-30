@@ -1,7 +1,7 @@
 {
   "name": "wordpress-to-200stack",
   "description": "A gated workflow migrating WordPress sites to microCMS + Next.js static export deployed on 200stack, with the deterministic wpkit CLI included (WXR analysis, media migration, schema generation, idempotent import, old/new verification).",
-  "version": "0.10.0",
+  "version": "0.11.0",
   "author": {
     "name": "anytools"
   },
