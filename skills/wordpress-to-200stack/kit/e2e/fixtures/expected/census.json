@@ -1,0 +1,43 @@
+{
+  "postTypes": {
+    "car": {
+      "publish": 2,
+      "draft": 1
+    },
+    "page": {
+      "publish": 1
+    },
+    "smart-custom-fields": {
+      "publish": 1
+    },
+    "attachment": {
+      "inherit": 1
+    }
+  },
+  "taxonomies": {
+    "brand": [
+      {
+        "slug": "acme",
+        "name": "Acme",
+        "uses": 1
+      }
+    ]
+  },
+  "taxonomyTermCounts": {
+    "brand": 1
+  },
+  "authors": [
+    {
+      "id": 7,
+      "login": "editor",
+      "displayName": "Editor"
+    }
+  ],
+  "attachments": 1,
+  "sanitizeReport": [
+    {
+      "codePoint": 8,
+      "count": 1
+    }
+  ]
+}

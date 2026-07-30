@@ -1,0 +1,44 @@
+{
+  "cars": [
+    {
+      "id": "assigned-first-car",
+      "createdAt": "2020-01-01T00:00:00.000Z",
+      "updatedAt": "2020-01-01T00:00:00.000Z",
+      "title": "First car",
+      "legacyBodyHtml": "<iframe src=\"https://www.youtube.com/embed/1\" loading=\"lazy\" title=\"動画\"></iframe><table><tr><td>x</td></tr></table><iframe src=\"https://www.youtube.com/embed/fixture-video?feature=oembed\" loading=\"lazy\" title=\"動画\"></iframe>\n\n<iframe src=\"https://www.youtube.com/embed/raw-fixture-video?feature=oembed\" loading=\"lazy\" title=\"動画\"></iframe>\n\n<p>https://vimeo.com/missing-video</p><img src=\"https://media.example.test/wp-content/uploads/a.jpg\" srcset=\"https://media.example.test/wp-content/uploads/a.jpg 1x, https://media.example.test/wp-content/uploads/a-2.jpg 2x\"><a href=\"https://example.test/about/\">About</a><a href=\"/not-in-ledger/\">Missing</a><a href=\"https://media.example.test/wp-content/uploads/a.pdf\">PDF</a>badtext",
+      "publishedAt": "2020-01-01T00:00:00.000Z",
+      "seoTitle": "Car %%sep%% %%sitename%%",
+      "seoDescription": "SEO description",
+      "noindex": true,
+      "price": 1230000,
+      "tags": ["classic", "acme"],
+      "gallery": [{ "fieldId": "gallery", "image": "https://media.example.test/wp-content/uploads/a.jpg", "caption": "caption 1" }, { "fieldId": "gallery", "image": "https://media.example.test/wp-content/uploads/a.jpg", "caption": "" }, { "fieldId": "gallery", "image": "https://media.example.test/wp-content/uploads/a.jpg", "caption": "caption 3" }],
+      "details": [{ "fieldId": "details", "price": 1230000 }, { "fieldId": "details", "price": 1330000 }, { "fieldId": "details", "price": 1430000 }],
+      "featuredImage": "https://media.example.test/wp-content/uploads/a.jpg",
+      "related": "about"
+    },
+    {
+      "id": "raw-autop",
+      "createdAt": "2020-01-02T00:00:00.000Z",
+      "updatedAt": "2020-01-02T00:00:00.000Z",
+      "title": "Raw autop",
+      "legacyBodyHtml": "<p>A1<br>\nA2</p>\n<p>B1<br>\nB2</p>\n",
+      "publishedAt": "2020-01-02T00:00:00.000Z",
+      "noindex": false,
+      "tags": [],
+      "details": [],
+      "gallery": [{ "fieldId": "gallery", "image": "https://media.example.test/wp-content/uploads/a.jpg", "caption": "raw caption" }]
+    }
+  ],
+  "pages": [
+    {
+      "id": "about",
+      "createdAt": "2020-01-04T00:00:00.000Z",
+      "updatedAt": "2020-01-04T00:00:00.000Z",
+      "title": "About",
+      "legacyBodyHtml": "<p>About</p>",
+      "publishedAt": "2020-01-04T00:00:00.000Z",
+      "noindex": false
+    }
+  ]
+}

@@ -3,6 +3,17 @@
 All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+
+- ゴールデンケース E2E(`kit/e2e/golden.test.ts`、`npm run e2e`): golden WXR・模擬アーカイブ・期待値 fixture で analyze〜status の8工程を in-process で1周し、サイト工程はテンプレの一時コピーへ undici MockAgent を `NODE_OPTIONS --import` 注入した `next build` → verify → scorecard → 12ゲート最終判定まで、ネットワークなしで決定的に検証する
+- 12ゲートに沿って golden ケースを手で一巡する `kit/e2e/walkthrough.md` と、3 surface 用の blocks.config 見本を追加
+
+### Changed
+
+- kit・テンプレート・スキル手順の改訂時に golden E2E を必須回帰ゲートとして実行する規約を追加
+
 ## [0.10.0] - 2026-07-31
 
 ### Added

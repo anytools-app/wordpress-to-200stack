@@ -1,0 +1,215 @@
+{
+  "cars": {
+    "apiFields": [
+      {
+        "fieldId": "title",
+        "name": "タイトル",
+        "description": "記事・コンテンツのタイトル。",
+        "required": true,
+        "kind": "text",
+        "textSizeLimitValidation": null,
+        "patternMatchValidation": null,
+        "isUnique": false
+      },
+      {
+        "fieldId": "legacyBodyHtml",
+        "name": "本文",
+        "description": "本文コンテンツ。",
+        "required": false,
+        "kind": "richEditorV2"
+      },
+      {
+        "fieldId": "seoTitle",
+        "name": "SEOタイトル",
+        "description": "検索結果に表示するタイトル。空欄ならタイトルから自動生成します。",
+        "required": false,
+        "kind": "text",
+        "textSizeLimitValidation": null,
+        "patternMatchValidation": null,
+        "isUnique": false
+      },
+      {
+        "fieldId": "seoDescription",
+        "name": "SEO説明文",
+        "description": "検索結果に表示する説明文(meta description)。",
+        "required": false,
+        "kind": "text",
+        "textSizeLimitValidation": null,
+        "patternMatchValidation": null,
+        "isUnique": false
+      },
+      {
+        "fieldId": "noindex",
+        "name": "検索結果に表示しない",
+        "description": "オンにすると検索エンジンにインデックスさせません(noindex)。",
+        "required": false,
+        "kind": "boolean",
+        "booleanInitialValue": false
+      },
+      {
+        "fieldId": "featuredImage",
+        "name": "アイキャッチ画像",
+        "description": "一覧や詳細ページで使うメイン画像。",
+        "required": false,
+        "kind": "media"
+      },
+      {
+        "fieldId": "price",
+        "name": "price",
+        "description": null,
+        "required": false,
+        "kind": "number",
+        "numberSizeLimitValidation": null
+      },
+      {
+        "fieldId": "tags",
+        "name": "tags",
+        "description": null,
+        "required": false,
+        "kind": "select",
+        "selectItems": [],
+        "multipleSelect": true,
+        "selectInitialValue": []
+      },
+      {
+        "fieldId": "gallery",
+        "name": "gallery",
+        "kind": "repeater",
+        "description": null,
+        "required": false,
+        "repeaterCountLimitValidation": null,
+        "customFieldCreatedAtList": [
+          "2021-08-26T16:49:08.000Z"
+        ]
+      },
+      {
+        "fieldId": "details",
+        "name": "details",
+        "kind": "repeater",
+        "description": null,
+        "required": false,
+        "repeaterCountLimitValidation": null,
+        "customFieldCreatedAtList": [
+          "2022-05-25T18:56:06.000Z"
+        ]
+      },
+      {
+        "fieldId": "related",
+        "name": "related",
+        "kind": "relation",
+        "description": null,
+        "required": false,
+        "listViewFieldId": "DEFAULT",
+        "referencedApiEndpoint": "pages"
+      }
+    ],
+    "customFields": [
+      {
+        "createdAt": "2021-08-26T16:49:08.000Z",
+        "fieldId": "gallery",
+        "name": "gallery",
+        "fields": [
+          {
+            "fieldId": "image",
+            "name": "image",
+            "description": null,
+            "required": false,
+            "kind": "media",
+            "idValue": "3095c9741c"
+          },
+          {
+            "fieldId": "caption",
+            "name": "caption",
+            "description": null,
+            "required": false,
+            "kind": "textArea",
+            "textSizeLimitValidation": null,
+            "patternMatchValidation": null,
+            "idValue": "73944236cd"
+          }
+        ],
+        "position": [
+          [
+            "3095c9741c",
+            "73944236cd"
+          ]
+        ],
+        "updatedAt": "2021-08-26T16:49:08.000Z",
+        "viewerGroup": ""
+      },
+      {
+        "createdAt": "2022-05-25T18:56:06.000Z",
+        "fieldId": "details",
+        "name": "details",
+        "fields": [
+          {
+            "fieldId": "price",
+            "name": "price",
+            "description": null,
+            "required": false,
+            "kind": "number",
+            "numberSizeLimitValidation": null,
+            "idValue": "c82c9abe9c"
+          }
+        ],
+        "position": [
+          [
+            "c82c9abe9c"
+          ]
+        ],
+        "updatedAt": "2022-05-25T18:56:06.000Z",
+        "viewerGroup": ""
+      }
+    ]
+  },
+  "pages": {
+    "apiFields": [
+      {
+        "fieldId": "title",
+        "name": "タイトル",
+        "description": "記事・コンテンツのタイトル。",
+        "required": true,
+        "kind": "text",
+        "textSizeLimitValidation": null,
+        "patternMatchValidation": null,
+        "isUnique": false
+      },
+      {
+        "fieldId": "legacyBodyHtml",
+        "name": "本文",
+        "description": "本文コンテンツ。",
+        "required": false,
+        "kind": "richEditorV2"
+      },
+      {
+        "fieldId": "seoTitle",
+        "name": "SEOタイトル",
+        "description": "検索結果に表示するタイトル。空欄ならタイトルから自動生成します。",
+        "required": false,
+        "kind": "text",
+        "textSizeLimitValidation": null,
+        "patternMatchValidation": null,
+        "isUnique": false
+      },
+      {
+        "fieldId": "seoDescription",
+        "name": "SEO説明文",
+        "description": "検索結果に表示する説明文(meta description)。",
+        "required": false,
+        "kind": "text",
+        "textSizeLimitValidation": null,
+        "patternMatchValidation": null,
+        "isUnique": false
+      },
+      {
+        "fieldId": "noindex",
+        "name": "検索結果に表示しない",
+        "description": "オンにすると検索エンジンにインデックスさせません(noindex)。",
+        "required": false,
+        "kind": "boolean",
+        "booleanInitialValue": false
+      }
+    ],
+    "customFields": []
+  }
+}

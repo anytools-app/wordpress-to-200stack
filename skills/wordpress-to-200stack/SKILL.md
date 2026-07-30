@@ -19,6 +19,7 @@ cd <案件>/wp-static-kit && npm install && npx playwright install chromium
 - 案件ルートにコミット対象の `migration-state.json` を `npm run wpkit -- status init --dir ..` で作成し、以後は `wpkit status` で通過済み gate と次工程を確認する
 - 台帳がある案件では後段コマンドの前提を強制する。緊急時だけ `--force` で上書き実行でき、その記録は台帳へ残る(台帳がない既存案件の挙動は変わらない)
 - `status` / `status approve` / 後段コマンドは `wp-static-kit` から案件ルートの台帳を上方探索するため、追加の `--dir` 指定は不要
+- 初めて担当するオペレーターは、実案件へ入る前に `kit/e2e/walkthrough.md` の golden ケースを一巡して CLI と12ゲートを確認する
 
 ## 全体フロー(ゲート順)
 
@@ -492,6 +493,7 @@ npm run wpkit -- scorecard --config ../scorecard.config.json
 ## 委任・記録の規約
 
 - 実装委任・レビュー・委任ログは delegate スキルの規約に従う(このスキルは何を委任するかの分割と品質ゲートを規定する)
+- kit・テンプレート・スキル手順を改訂したら、記録前に `cd kit && npm run e2e`（golden E2E）を実行し、回帰ゼロを確認する
 - kit に案件固有ロジックを入れない。案件差は mapping.config と site/ 側で吸収
 - 案件へピン留めした kit からスキルへ変更を還元するときは、委任先が変更したファイルだけを列挙してコピーする。古いスナップショットを `rsync` で一括同期せず、反映後に `git diff --stat` で対象を照合する
 - 案件で得た WXR・プラグイン固有の癖・事故はこのスキルの `lessons.md` に1行追記する(このリポジトリは非公開なので案件名・実測値を書いてよい)。複数案件で再現した知見に加え、1案件でも案件非依存が明白な外部仕様・FW 挙動・実装パターンは待たずに `SKILL.md` / `design.md` / `recipes.md` へ昇格し、`lessons.md` には案件固有の実測値・経緯だけを残す。認証情報・個人情報・`_scratch/` の生成物は書かない

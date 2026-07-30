@@ -1,0 +1,8 @@
+{
+  "urls": [
+    { "url": "https://example.test/", "status": 200, "title": "Home", "screenshots": false },
+    { "url": "https://example.test/cars/raw-autop/", "status": 200, "title": "Raw autop", "screenshots": false },
+    { "url": "https://example.test/about/", "status": 200, "title": "About", "screenshots": false }
+  ],
+  "forms": [], "warnings": [], "summary": { "urls": 3, "ok": 3, "failed": 0, "forms": 0 }
+}

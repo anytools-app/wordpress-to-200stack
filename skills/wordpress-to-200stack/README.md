@@ -44,7 +44,7 @@ skills/wordpress-to-200stack/
 ├── recipes.md     # 再現実装と診断のレシピ集(次回移行でそのまま使う手順)
 ├── modernize.md   # 旧方式で移行済みの既存案件を最終形へ引き上げる手順
 ├── lessons.md     # 案件ごとの実測記録(WXR の罠、プラグイン固有の癖、事故)
-└── kit/           # wpkit CLI(TypeScript。vitest テスト・Playwright 同梱)
+└── kit/           # wpkit CLI(TypeScript。vitest テスト・Playwright・golden E2E 同梱)
 ```
 
 実装・診断の再利用手順は `recipes.md`、案件固有の実測記録・事故例は `lessons.md` に記録します。このリポジトリは非公開ですが、認証情報・個人情報・`_scratch/` の生成物は記録しません。
