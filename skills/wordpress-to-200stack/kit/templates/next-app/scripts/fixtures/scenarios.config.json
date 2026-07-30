@@ -1,0 +1,83 @@
+{
+  "remote": {
+    "hosts": ["fonts.googleapis.com", "fonts.gstatic.com"],
+    "passthrough": ["youtube.com", "ytimg.com", "googlevideo.com"]
+  },
+  "stableTimeoutMs": 3000,
+  "scenarios": [
+    {
+      "name": "TODO(案件): スクロール連動ヘッダー",
+      "type": "scroll-computed",
+      "url": "/",
+      "note": "TODO(案件): 閾値の前後を steps に入れ、実機で確定した computed 値を expect に設定する。",
+      "selector": "TODO(案件): header selector",
+      "property": "transform",
+      "steps": [
+        { "y": 0, "expect": "TODO(案件): 初期 computed 値" },
+        { "y": 160, "expect": "TODO(案件): スクロール後 computed 値" }
+      ]
+    },
+    {
+      "name": "TODO(案件): 空フォーム送信",
+      "type": "form-empty-submit",
+      "url": "/contact/",
+      "viewport": { "width": 375, "height": 812 },
+      "note": "TODO(案件): 必須未入力時に見えるエラー selector を指定する。外部への送信はランナーが遮断する。",
+      "formSelector": "TODO(案件): form selector",
+      "submitSelector": "TODO(案件): submit selector",
+      "errorSelector": "TODO(案件): visible error selector",
+      "minCount": 1
+    },
+    {
+      "name": "TODO(案件): フォーム SDK 初期化とプリフィル",
+      "type": "form-sdk-init",
+      "url": "/contact/",
+      "note": "TODO(案件): SDK が生成する option / validation DOM と、必要なら URL 由来のプリフィル value を確認する。",
+      "checks": [
+        { "selector": "TODO(案件): SDK option selector", "minCount": 1 },
+        { "selector": "TODO(案件): prefilled input selector", "value": "TODO(案件): expected prefill" }
+      ]
+    },
+    {
+      "name": "TODO(案件): push 遷移の scroll 復元",
+      "type": "nav-scroll-reset",
+      "url": "/",
+      "note": "TODO(案件): Next.js の push 遷移で先頭へ戻り、戻る操作で元スクロールへ復元することを確認する。via は preScrollY の位置で可視のリンク(固定ヘッダー内またはその深さのカード)を指定する。画面外リンクでは click 前に自動スクロールされ、その後の実測値が before になる。",
+      "routes": [
+        {
+          "from": "/",
+          "via": "TODO(案件): internal link selector",
+          "to": "/TODO(案件)-destination/",
+          "preScrollY": 600,
+          "bodyCheck": { "selector": "body", "property": "overflow", "expect": "TODO(案件): post-navigation overflow" }
+        }
+      ]
+    },
+    {
+      "name": "TODO(案件): ホバー演出",
+      "type": "hover",
+      "url": "/",
+      "note": "TODO(案件): hover 前後の computed 値を実機で確定して設定する。",
+      "selector": "TODO(案件): hover trigger selector",
+      "target": "TODO(案件): animated target selector",
+      "property": "opacity",
+      "before": "TODO(案件): before computed 値",
+      "expect": "TODO(案件): hovered computed 値"
+    },
+    {
+      "name": "TODO(案件): カルーセル矢印と無限端",
+      "type": "carousel",
+      "url": "/",
+      "note": "TODO(案件): next-arrow / prev-arrow / dot / drag / autoplay-stopped を案件の必要分だけ追加する。repeat は無限ループ端の確認用。",
+      "rootSelector": "TODO(案件): carousel root selector",
+      "action": "next-arrow",
+      "arrowSelector": "TODO(案件): next arrow selector",
+      "repeat": 3,
+      "assert": {
+        "selector": "TODO(案件): active slide selector",
+        "attribute": "aria-current",
+        "expect": "TODO(案件): expected attribute"
+      }
+    }
+  ]
+}

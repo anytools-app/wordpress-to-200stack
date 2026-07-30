@@ -111,6 +111,22 @@ npm run wpkit -- scorecard --config ../scorecard.config.json
 `routing-config.jsonc` は旧 URL の301正本です。`src/data/legacy-routes.json` の全 URL が
 実出力または301先の実出力へ到達し、新ルート重複が0であることを `verify:routes` が検証します。
 
+## 実機レビュー行動シナリオ(live-scenarios)
+
+`npm run build` 済みであること、および初回だけ `npx playwright install chromium` を実行していることが前提です。
+案件ルートで雛形をコピーし、`TODO(案件)` を実 selector・期待値へ置き換えます。
+
+```sh
+cp scripts/fixtures/scenarios.config.json scenarios.config.json
+npm run live-scenarios
+npm run live-scenarios -- --record
+```
+
+`--record` は機械化済みの結果を `docs/live-review.json` の `scenarios` へ転記します。`reviewer` と
+`findings` は人が記入します。exit code は全 pass が 0、scenario fail が 1、config・build・環境エラーが 2 です。
+実機レビューで見つけた指摘は `scenarios.config.json` へ追加して再実行し、再発を防ぎます。誤設定でも
+フォーム等が外部へ送信されないよう、127.0.0.1 / localhost 以外への非 GET/HEAD request はランナーが遮断します。
+
 ## fidelity ブロック計測
 
 計測前に `WPKIT_ARCHIVE_DIR` と `WPKIT_ORIGIN` を設定し、`npm run build` で `out/` を作成します。

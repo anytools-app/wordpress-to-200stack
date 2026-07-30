@@ -3,6 +3,16 @@
 All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+
+- テンプレに外部非 GET/HEAD を遮断する Playwright 実機レビュー行動シナリオランナー `live-scenarios.mjs`、設定雛形、記録転記、core テストを追加
+
+### Changed
+
+- 実機レビューの標準観点と指摘の `scenarios.config.json` への機械化手順を SKILL・recipe・設計・実装指示書へ追加
+
 ## [0.10.0] - 2026-07-31
 
 ### Added

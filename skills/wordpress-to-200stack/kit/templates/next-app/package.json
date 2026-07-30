@@ -15,6 +15,7 @@
     "verify:seo": "node scripts/verify-seo.mjs",
     "verify:stylesheets": "node scripts/verify-stylesheets.mjs",
     "verify:webvitals-preload": "node scripts/verify-webvitals-preload.mjs",
+    "live-scenarios": "node scripts/live-scenarios.mjs",
     "fixtures:update": "node scripts/update-archive-fixtures.mjs"
   },
   "dependencies": {
