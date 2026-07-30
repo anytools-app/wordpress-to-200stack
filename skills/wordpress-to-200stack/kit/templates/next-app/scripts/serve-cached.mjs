@@ -7,10 +7,10 @@ import { resolveCached } from "./lib/remote-cache.mjs";
 const project = resolve(import.meta.dirname, "..");
 // 移行元サイトのオリジン。fetch-once キャッシュ経由で1回だけ取得する(本番保護)。
 const ORIGIN = process.env.WPKIT_ORIGIN?.replace(/\/$/, "");
-const outDir = join(project, "out");
+const defaultOutDir = join(project, "out");
 const MIME_TYPES = { ".css": "text/css; charset=utf-8", ".html": "text/html; charset=utf-8", ".ico": "image/x-icon", ".js": "text/javascript; charset=utf-8", ".json": "application/json; charset=utf-8", ".png": "image/png", ".svg": "image/svg+xml", ".webp": "image/webp", ".woff": "font/woff", ".woff2": "font/woff2" };
 
-function outputPath(pathname) {
+function outputPath(outDir, pathname) {
   return pathname === "/"
     ? join(outDir, "index.html")
     : extname(pathname)
@@ -18,8 +18,8 @@ function outputPath(pathname) {
       : join(outDir, ...pathname.slice(1).split("/"), "index.html");
 }
 
-function safePath(pathname) {
-  const candidate = resolve(outputPath(pathname));
+function safePath(outDir, pathname) {
+  const candidate = resolve(outputPath(outDir, pathname));
   if (candidate !== outDir && !candidate.startsWith(`${outDir}${sep}`)) throw new Error("invalid path");
   return candidate;
 }
@@ -30,7 +30,8 @@ function send(response, status, contentType, body, method) {
 }
 
 /** Serve exported files first, then proxy missing assets through the fetch-once remote cache. */
-export function createCachedServer() {
+export function createCachedServer({ outDir = defaultOutDir } = {}) {
+  const resolvedOutDir = resolve(outDir);
   return createServer(async (request, response) => {
     const method = request.method ?? "GET";
     if (!["GET", "HEAD"].includes(method)) {
@@ -40,7 +41,7 @@ export function createCachedServer() {
     let url;
     try {
       url = new URL(request.url ?? "/", "http://localhost");
-      const file = safePath(url.pathname);
+      const file = safePath(resolvedOutDir, url.pathname);
       const body = await readFile(file);
       send(response, 200, MIME_TYPES[extname(file)] ?? "application/octet-stream", body, method);
       return;

@@ -54,8 +54,8 @@
 - 粒状背景は本文のない背景だけの帯をサンプリングし、レイアウト差と画像変換差を分ける。(案件C)
 - ノイズ / グレイン系テクスチャの劣化は隣接画素差の平均で判定する。min / max は圧縮リンギングの外れ値を拾うため品質判定に使わない。(案件C)
 - `transition:all` を持つ要素の凍結スクリーンショットには合成レイヤー由来の寸法アーティファクトが混じり得る。スクリーンショットへ合わせて CSS を縮めず、`getBoundingClientRect()` と CDP matched rules で実寸を確定する。(案件C)
-- 未描画ペインでは IntersectionObserver が発火せず、遷移中の computed transform は中間値になる。Playwright で実際に描画し、段階スクロールと遷移完了後の computed 値で判定する。
-- 動き系は静的ゲート通過後に実機で人が操作し、見つかった差を「スクロール→computed」「空送信→エラー」「遷移→プリフィル」の Playwright 行動シナリオへ落とす。(案件C)
+- 未描画ペインでは IntersectionObserver が発火せず、遷移中の computed transform は中間値になる。Playwright で実際に描画し、段階スクロールと遷移完了後の computed 値で判定する。`live-scenarios` は実描画・段階スクロール・安定待ちを内蔵する。
+- 動き系は静的ゲート通過後に実機で人が操作し、見つかった差を `scenarios.config.json` の `live-scenarios` 組み込み6種の宣言へ落とし、`node scripts/live-scenarios.mjs` で再実行する。(案件C)
 - webpack と Turbopack の HTML を比較するときは、script、`/_next/static/` link、CSS Modules class、RSC module ID、head 内要素順を正規化する。バンドラ由来の非決定差を DOM 回帰として扱わない。(案件A)
 - zsh から複雑な計測式を `node -e` へ渡さず、スクリプトをファイル化してリポジトリ直下から実行する。相対パスが古い計測結果を読む事故を防ぐ。(案件A)
 - build memory は opt-in の preload probe で PID 別 `process.memoryUsage()` を定点採取し、しきい値超過時だけ heap snapshot を取る。外部の node プロセスを混ぜないよう開始前 PID を除外する。(案件A)

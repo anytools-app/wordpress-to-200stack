@@ -347,9 +347,13 @@ export function SiteLink({ href, ...props }: ComponentPropsWithoutRef<"a">) {
 - reducedMotion をエミュレートし、自動送り UI は `prefers-reduced-motion: reduce` で停止する
 - スクリーンショットには合成レイヤー由来の寸法アーティファクトが混じり得る。
   `getBoundingClientRect()` + CDP matched rules を判定の正とする
-- **全ゲート通過後、動き系を実機で人が触るレビューを必須にする**。スクロール連動・SDK 初期化・
-  ホバー演出を確認し、指摘は Playwright の行動シナリオ(スクロール→computed、空送信→エラー、
-  遷移→プリフィル)へ機械化する。実測では収束・全ゲート通過後に9件の指摘が出た
+- **全ゲート通過後、動き系を実機で人が触るレビューを必須にする**。これは全案件共通の下限であり、案件固有の動きは追加する。実測では収束・全ゲート通過後に9件の指摘が出た
+  - スクロール連動: ヘッダーの出没・スクロール反応 UI を閾値前後で確認し、computed 値を確定する
+  - カルーセル: ドラッグ・矢印・ドット・自動送り(reduced-motion で停止)・無限ループの端を確認する
+  - フォーム全経路: 空送信→エラー表示、正常入力→確認/送信到達(**実送信はしない**)、SDK 初期化(option・validation DOM の実在)、プリフィルを確認する
+  - 遷移: push 遷移の行列で scrollY=0、ブラウザ戻るで復元、遷移後の body / スタイル状態を確認する
+  - ホバー・ライトボックス: ホバー演出、モーダル開閉とフォーカスを確認する
+  - 運用: レビュー後の指摘はテンプレ同梱の `live-scenarios.mjs` (`scenarios.config.json`) へ機械化して再発を防ぐ。`--record` は `docs/live-review.json` の `scenarios` へ転記し、`findings` はこれまでどおり人が記録する
 
 #### pixel-gate: 変更前後の自ビルド比較
 

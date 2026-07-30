@@ -89,6 +89,7 @@ site/ の Next.js(静的エクスポート)に <route パターン> の表示テ
 - axe-coreで本番アーカイブと比較し、**違反を増やしていない**こと(本番由来の違反は別issue)
 - スクロール連動(IntersectionObserver)は**実際に描画される環境**で**段階的スクロール**により検証すること
   (瞬間ジャンプは高さ1pxの番兵を交差せず飛び越える)
+- 動き系の変更がある場合は `scenarios.config.json` に対象シナリオを追加し、`live-scenarios` を実行すること
 
 ## 禁止
 - site/ 外の変更、依存追加、コミット
@@ -126,6 +127,7 @@ site/ の Next.js(静的エクスポート)に <route パターン> の表示テ
 - フォームaction/name、内部/外部リンク、title/canonical/OGP/robotsを照合する
 - DOMタグ実体数カウントは診断に使ってよいが、完了条件にしない
 - CSS・レイアウト変更はpixel-gateのbefore/after比較で退行0を確認する
+- 動き系の変更がある場合は `scenarios.config.json` に対象シナリオを追加し、`live-scenarios` を実行する
 - 単純なページでパターンを承認してから、複雑な固定ページへ進む
 
 ## 禁止

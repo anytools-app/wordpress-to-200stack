@@ -91,6 +91,8 @@ dev 中の microCMS 更新はサーバー再起動不要で、最大5秒後の�
 { "date": "2026-07-28", "reviewer": "名前", "build": "out の内容ハッシュ", "scenarios": [{ "name": "フォーム送信", "result": "ok" }], "findings": [{ "summary": "確認済み", "resolved": true }] }
 ```
 
+`scenarios` のうち機械化済み分はテンプレ同梱の `live-scenarios.mjs --record` が転記し、`findings` は人が記録する。
+
 ```json
 { "a11y": { "date": "2026-07-28", "by": "名前", "values": { "violations": 0 }, "note": "任意" }, "lighthouse": { "date": "...", "by": "...", "values": {} } }
 ```
