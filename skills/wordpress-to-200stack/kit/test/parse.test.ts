@@ -8,6 +8,7 @@ import { describe, expect, it } from "vitest";
 import mapping from "./fixtures/mini-mapping.config.js";
 import { defineMigration } from "../src/config.js";
 import { parseMigration, writeParseResult } from "../src/parse/index.js";
+import { rewriteLegacyHtml } from "../src/parse/html.js";
 
 const fixturePath = fileURLToPath(new URL("./fixtures/mini-wxr.xml", import.meta.url));
 
@@ -17,6 +18,26 @@ async function parse(xmlTransform?: (xml: string) => string, config = mapping) {
 }
 
 describe("wpkit parse", () => {
+  it("supplements missing iframe titles without replacing existing titles", () => {
+    const context = {
+      site: { origin: "https://example.test", mediaHost: "https://media.example.test" },
+      routePaths: new Set<string>(),
+      allowIframeHosts: new Set(["www.youtube.com", "calendar.google.com", "player.vimeo.com"]),
+    };
+
+    const result = rewriteLegacyHtml([
+      '<iframe src="https://www.youtube.com/embed/example"></iframe>',
+      '<iframe src="https://calendar.google.com/calendar/embed"></iframe>',
+      '<iframe src="https://player.vimeo.com/video/example" title=""></iframe>',
+      '<iframe src="https://www.youtube.com/embed/titled" title="既存のタイトル"></iframe>',
+    ].join(""), context);
+
+    expect(result.html).toContain('src="https://www.youtube.com/embed/example" loading="lazy" title="動画"');
+    expect(result.html).toContain('src="https://calendar.google.com/calendar/embed" loading="lazy" title="埋め込みコンテンツ"');
+    expect(result.html).toContain('src="https://player.vimeo.com/video/example" title="動画" loading="lazy"');
+    expect(result.html).toContain('src="https://www.youtube.com/embed/titled" title="既存のタイトル" loading="lazy"');
+  });
+
   it("normalizes decoded NFC routes and keeps trailing-slash data", async () => {
     const result = await parse((xml) => xml.replace("%e3%82%a2%e3%82%af%e3%83%a1/", "cafe%CC%81/"));
     expect(result.routes.find((route) => route.wpId === 10)).toMatchObject({ path: "/cars/café", segments: ["cars", "café"], trailingSlash: true });

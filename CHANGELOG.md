@@ -3,6 +3,18 @@
 All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+
+- WordPress 本家 `wpautop()` 相当の変換を `wpkit parse` の本文パイプラインへ追加
+- 本文への自動適用を無効化できる mapping.config の top-level `wpautop` オプションを追加(既定 `true`)
+- 許可 iframe の title 未設定時に、動画ホストは「動画」、その他は「埋め込みコンテンツ」を補完
+
+### Changed
+
+- 監査に基づき SKILL / design の kit 挙動記述を実装の実態へ修正
+
 ## [0.7.0] - 2026-07-30
 
 ### Added

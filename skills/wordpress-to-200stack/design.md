@@ -4,6 +4,7 @@
 案件あたりの人手作業を大幅に圧縮する。
 複数の実案件で得た再現性・運用負荷・障害の知見を設計へ反映する。案件固有の実測は `lessons.md`、
 次回そのまま使う実装・診断手順は `recipes.md`、規約・ゲートは `SKILL.md` を正とする。
+SKILL / design が kit の挙動として記述する事項は、変更時に kit 実装と突き合わせる。
 
 ## 全体アーキテクチャ
 
@@ -117,34 +118,36 @@ dev 中の microCMS 更新はサーバー再起動不要で、最大5秒後の�
   - microCMS へ移行する記事本文 HTML は legacyBodyHtml として保持。画像 URL・内部リンクを台帳で書き換え、
     script 除去・埋め込み(YouTube/Vimeo/Instagram/GCal)はプレースホルダー化
   - **`content:encoded` は保存形式であって表示形式ではない**。WordPress は `wpautop()` を表示時に
-    適用するため、WXR の本文は `<p>` も `<br>` も持たないプレーンテキストである。**IR 化の前に
-    `wpautop` 相当を適用する**。素通しすると改行が空白に潰れ、取り込み後は WXR / IR に戻らない限り
-    復元できない(実測 537件中245件が該当)。出力に「単独改行数 → `<br>` 数」の整合を検査項目として持つ
-  - **保存先 CMS のサニタイザが落とす構造を parse 側で検出して警告する**。microCMS は HTML 仕様上
+    適用するため、WXR の本文は `<p>` も `<br>` も持たないプレーンテキストである。kit の parse は oEmbed
+    展開後・IR 化前に `wpautop` 相当を適用する(既定 `true`、mapping.config の top-level `wpautop: false`
+    で無効化)。展開前の本文に `<p>` 構造または Gutenberg ブロックコメントがあれば二重適用しない。
+    素通しすると改行が空白に潰れ、取り込み後は WXR / IR に戻らない限り復元できない(実測 537件中245件が
+    該当)。出力に「単独改行数 → `<br>` 数」の整合を検査項目として持つ
+  - **保存先 CMS のサニタイザが落とす構造に注意する(parse 側の自動検出は未実装・改善候補)**。microCMS は HTML 仕様上
     不正な入れ子(`<h2>` 内の `<p>` 等)を除去するため、wpautop の出力がそのまま保存できない記事が
-    出る(実測67件)。落ちると見出しの中身が丸ごと見出しサイズで描画される
+    出る(実測67件)。落ちると見出しの中身が丸ごと見出しサイズで描画される。現状は入稿後の実表示・差分確認で拾う
   - relation(投稿間参照)は wp_id で解決し relations.json へ
   - 本文の inline style は inline-styles.json に集計(要素数・出現ページ・プロパティ頻度)。
     サイト側サニタイザが style 属性を除去するため、削除許容かデータ変換かを移行者が判断する材料
 - 出力に validation-report.json(URL 衝突・未解決参照・リピータ不一致・画像欠損)。**エラー0が次工程のゲート**
 
 ### wpkit media pull / push
-- pull: attachment 原本 + `_wp_attachment_metadata` の派生サイズ + 本文 srcset 参照 + CSS url() を
-  並列ダウンロード(リトライ・チェックサム・content-type 検証)→ manifest
+- pull: attachment 原本 + 本文 srcset 参照を並列ダウンロード(リトライ・チェックサム・content-type 検証)→ manifest。
+  `_wp_attachment_metadata` の派生サイズは `--include-derived` 指定時のみ回収し、CSS `url()` 資産は archive の資産保存が担う
 - push: S3互換ストレージを指定された例外案件向けの残置コマンド。デフォルト成果物はuploadsをmicroCMSメディア、テーマ資産をサイト同梱とする
 - 欠損レポートを人が確認するのが唯一の手作業
 
 ### wpkit schema gen / wpkit import
 - schema gen: mapping.config から microCMS の API スキーマ JSON を生成(管理画面のインポート機能で投入)
   - 管理画面が受理する正式エクスポート形式で生成する。`customFields` は決定的な過去日時の `createdAt` / `updatedAt` を持ち、各サブフィールドに sha256 先頭10桁の `idValue` を付け、`position` は fieldId でなくその `idValue` 配列にする
-  - API 側の単一カスタムフィールドは `customFieldCreatedAt`、repeater は `customFieldCreatedAtList` で対応する `customFields[].createdAt` を参照する。boolean の初期値は `booleanInitialValue`、select は `selectInitialValue` を使う
+  - API 側の単一カスタムフィールドは `customFieldCreatedAt`、repeater は `customFieldCreatedAtList` で対応する `customFields[].createdAt` を参照する。boolean の初期値は `booleanInitialValue`、複数選択の `stringArray` / `taxonomyFields` は `selectInitialValue` を使い、単一 `select` は初期値プロパティなしで生成する
   - `requiredFields` に指定した共通フィールド・通常フィールド・repeater / カスタムフィールド等は、生成後の API フィールドで `required: true` にする
   - `fields` / `repeaters` / `relations` / `groups` / `taxonomyFields` の `description` を microCMS の説明文へ反映する。`richText` は `richEditorV2` として生成し、共通本文 `legacyBodyHtml` にも使用する
   - relation の表示名は `label`、単一カスタムフィールドは `groups` でフラットな `fieldIds` / `relationIds` を束ねる。未定義参照・fieldId 重複・複数グループ所属は config 検証で拒否する
   - `taxonomyFields` は WordPress term を `value=term名`、`id=slugのsha256先頭10桁` の複数選択肢として記事 API 内に生成する。既存の IR 凍結用 `taxonomies` は併存する
   - `seoFields: "none"` は `seoTitle` / `seoDescription` を生成せず、`noindex` は常に残す
 - import: コンテンツ API で冪等入稿
-  - contentId は `^[a-z0-9_-]+$` に適合する旧slugを優先し、不適合ならmicroCMS自動採番。旧URL→新IDを301台帳へ残す
+  - 既定の contentId は `wpId` 方式。`contentIdStrategy: "legacySlug"` 指定時は `^[a-z0-9_-]+$` に適合する旧slugを優先し、不適合・重複時は `wpId` 方式へフォールバックする。旧URL→新IDを301台帳へ残す
   - PUT は新規作成専用、既存contentIdはPATCH。already exists時のPATCHフォールバックとpayloadChecksum一致skipで再実行可能にする
   - ペイロードは送信前に正規化し、`null` / `undefined` キーを除去する(画像フィールドの`null`は実測504)
   - レート制御(WRITE 5回/秒、実効 4/秒)+ 429 / 5xx 指数バックオフ、AbortController 60秒
@@ -163,7 +166,7 @@ microCMS の前提:
 - WordPress タクソノミーは専用 API を増やさず、記事内の複数選択フィールドで表現できる。これは microCMS の API 数上限対策になる
 
 ### wpkit archive <url> / wpkit verify <old> <new>
-- archive: sitemap+リンククロールで全 URL 収集 → HTML・ヘッダー・canonical・スクショ(desktop/mobile)保存。
+- archive: sitemap+リンククロールで全 URL 収集 → HTML・ステータス/リダイレクト・meta 情報(title / canonical / description / robots / OGP)・スクショ(desktop/mobile)保存。
   切替後は取得不能になる基準データなので着手時に必ず実行。保存 HTML とスクショは固定ページの
   書き起こし・人間レビューにも使うが、実行時に再掲するデータソースにはしない
 - **稼働テーマ一式もクロールとは別に入手して凍結する**(`_scratch/wp-theme/`)。archive が写すのは
@@ -176,7 +179,7 @@ microCMS の前提:
 - アーカイブ取得・スクショ比較・ローカルレビューの外部リクエストは、キャッシュ → archive assets →
   未取得時だけネットワーク、の fetch-once 解決を維持し、原点へ同一 URL を繰り返し要求しない
 - verify: 新旧の URL パリティ(旧200が新でも200)、内部リンク・画像404、title/description/canonical/OGP 比較、
-  Playwright スクショ差分(閾値超えのみ人がトリアージ)→ HTML レポート
+  Playwright スクショ差分(閾値超えのみ人がトリアージ)→ JSON / Markdown レポート(`verify-report.json` / `verify-report.md`)
 
 ## mapping.config(案件ごとに書く唯一のファイル)
 
@@ -303,11 +306,11 @@ analyze が config の雛形(フィールド定義込み)を自動生成し、�
 
 静的エクスポート構成でも編集者が下書きを確認できるよう、`/preview/` を CSR シェルとしてデフォルトで実装する。
 
-- **ルート**: `/preview/?api=<endpoint>&id={CONTENT_ID}&draftKey={DRAFT_KEY}`。静的ルート1枚(`robots: noindex`)+ Suspense 配下の `"use client"` コンポーネントが useSearchParams で受けてコンテンツ API を直接 GET する
+- **ルート**: `/preview/?api=<endpoint>&contentId={CONTENT_ID}&draftKey={DRAFT_KEY}`。静的ルート1枚(`robots: noindex`)+ Suspense 配下の `"use client"` コンポーネントが useSearchParams で受けてコンテンツ API を直接 GET する
 - **draftKey は任意**: 下書きは microCMS がコンテンツ単位の draftKey を自動付与、公開中コンテンツは draftKey なしで公開データを表示する(必須にしない — 実測で編集者が公開後の画面確認にも使う)
 - **API キー**: `NEXT_PUBLIC_MICROCMS_SERVICE_DOMAIN` / `NEXT_PUBLIC_MICROCMS_PREVIEW_KEY` の2環境変数。`NEXT_PUBLIC_*` はブラウザへ露出するため、プレビューキーは **GET のみ許可の読み取り専用キー必須**(入稿用 Management キーの流用禁止)
 - **実画面と同一コード**: レコード正規化とテンプレ props 生成をサーバ/クライアント共通モジュールへ切り出し、SSG とプレビュー CSR が**同じ関数・同じ templates/registry** を通る構成にする。プレビュー専用の描画分岐を作らない(分岐した瞬間に「プレビューでは崩れない」保証が消える)
-- **関連コンテンツ**(サイドバー・関連記事・relation)は公開 API からベストエフォート取得し、失敗しても本体は空の関連データで描画する(API 単位の関連マップを定義)
+- **関連コンテンツ**(サイドバー・関連記事・relation)は公開 API からベストエフォート取得し、失敗しても本体は空の関連データで描画する(API 単位の関連マップを定義。関連取得は未実装・改善候補。現状は関連データなしで描画)
 - **SEO ゲートとの接続**: `/preview/` の noindex と sitemap 除外は `verify:seo` の検証項目に含める
 - **管理画面設定**: microCMS 各 API の「画面プレビュー」へ上記 URL 形式を設定(API ごとに `api=` のみ変更)。環境変数と合わせて案件 docs に `microcms-setup.md` として手順を残し、設定はユーザー(管理画面オーナー)へ依頼する
 

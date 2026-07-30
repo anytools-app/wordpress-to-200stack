@@ -27,6 +27,8 @@ export type MigrationConfig = {
   wxr: string;
   site: { origin: string; mediaHost: string };
   contentIdStrategy?: "wpId" | "legacySlug";
+  /** 既定 true。false で本文への wpautop 適用を無効化する。 */
+  wpautop?: boolean;
   exclude?: { postTypes?: string[]; statuses?: string[] };
   apis: Record<string, ApiDef>;
   seo?: { yoast?: boolean };
@@ -115,6 +117,7 @@ const MigrationConfigSchema = z.object({
   wxr: nonEmpty,
   site: z.object({ origin: z.string().url(), mediaHost: z.string().url() }).strict(),
   contentIdStrategy: z.enum(["wpId", "legacySlug"]).optional(),
+  wpautop: z.boolean().optional(),
   exclude: z.object({ postTypes: z.array(nonEmpty).optional(), statuses: z.array(nonEmpty).optional() }).strict().optional(),
   apis: z.record(nonEmpty, ApiDefSchema).refine((apis) => Object.keys(apis).length > 0, "apis は1件以上必要です"),
   seo: z.object({ yoast: z.boolean().optional() }).strict().optional(),
