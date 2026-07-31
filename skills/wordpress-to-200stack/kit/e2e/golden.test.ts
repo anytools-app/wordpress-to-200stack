@@ -125,9 +125,8 @@ describe("golden migration E2E (steps 1-8)", () => {
       cp(analysisDir, join(workDir, "_scratch", "analysis"), { recursive: true }),
       cp(irDir, join(workDir, "_scratch", "ir"), { recursive: true }),
       cp(schemaDir, join(workDir, "_scratch", "microcms-schema"), { recursive: true }),
-      mkdir(join(workDir, "_scratch", "archive"), { recursive: true }),
+      cp(join(fixtures, "archive"), join(workDir, "_scratch", "archive"), { recursive: true }),
     ]);
-    await writeFile(join(workDir, "_scratch", "archive", "meta.json"), "{}\n");
     await initStatus({ cwd: workDir });
     for (const gate of ["mapping", "media", "schema-import"] as const) await approveStatusGate({ cwd: workDir, gate, by: "golden-e2e" });
     const status = await getStatus({ cwd: workDir });
