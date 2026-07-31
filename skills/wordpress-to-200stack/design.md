@@ -189,6 +189,18 @@ microCMS の前提:
 - verify: 新旧の URL パリティ(旧200が新でも200)、内部リンク・画像404、title/description/canonical/OGP 比較、
   Playwright スクショ差分(閾値超えのみ人がトリアージ)→ JSON / Markdown レポート(`verify-report.json` / `verify-report.md`)
 
+## ゴールデンケース E2E
+
+`kit/e2e/golden.test.ts` は、WXR分析からテンプレート build、verify、scorecard、12ゲートの確定までを8工程で通す必須回帰ゲートである。
+単体テストは各コマンド・変換規則・異常系の契約を細かく固定し、golden E2E はそれらをつないだ成果物契約を固定する。
+入力・期待値は `e2e/fixtures/` にチェックインし、ネットワークなしで同一入力から同一結果になるようにする。
+実 microCMS への schema 登録・content import・media upload は mock 境界とし、HTTP の POST / PUT / PATCH と relation の二段階更新を検証する。
+旧サイトは実クロールせず archive fixture を使い、remote-cache は事前充填して media transform の外部 fetch を遮断する。
+サイト build は `MockAgent` 注入で microCMS API を fixture 応答へ置換し、実サービスやアカウントを要求しない。
+そのため E2E は外部接続の可否ではなく、CLI・fixture・テンプレート間の統合回帰を検出する。
+kit、テンプレート、またはスキル手順を変更したら `npm run e2e` を実行し、8/8 成功を確認してから変更を記録する。
+人手で工程を理解する入口は `kit/e2e/walkthrough.md` とし、spike 用の `e2e/spike/` は本編の運用導線に含めない。
+
 ## mapping.config(案件ごとに書く唯一のファイル)
 
 ```ts

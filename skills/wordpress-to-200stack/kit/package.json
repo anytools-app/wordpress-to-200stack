@@ -7,6 +7,7 @@
     "test": "test"
   },
   "scripts": {
+    "e2e": "vitest run --config e2e/vitest.config.ts",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
     "wpkit": "node --import tsx src/cli.ts"

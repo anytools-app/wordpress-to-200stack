@@ -1,0 +1,45 @@
+{
+  "common": [
+    {
+      "id": "document",
+      "selector": "html",
+      "reason": "golden fixture は本文レイアウトを持たない最小 HTML のため、全 surface の共通ルートを測定する"
+    }
+  ],
+  "surfaces": [
+    {
+      "surface": "home",
+      "path": "/",
+      "blocks": [
+        {
+          "id": "title",
+          "selector": "title",
+          "reason": "トップ surface の fixture 固有コンテンツ"
+        }
+      ]
+    },
+    {
+      "surface": "about",
+      "path": "/about/",
+      "blocks": [
+        {
+          "id": "title",
+          "selector": "title",
+          "reason": "About surface の fixture 固有コンテンツ"
+        }
+      ]
+    },
+    {
+      "surface": "car-detail",
+      "path": "/cars/raw-autop/",
+      "blocks": [
+        {
+          "id": "title",
+          "selector": "title",
+          "reason": "wpautop を通る車両詳細 surface の fixture 固有コンテンツ"
+        }
+      ]
+    }
+  ],
+  "notes": "golden E2E の3 surface を示す見本。実案件では archive の DOM に合わせて common と blocks を置き換える。"
+}

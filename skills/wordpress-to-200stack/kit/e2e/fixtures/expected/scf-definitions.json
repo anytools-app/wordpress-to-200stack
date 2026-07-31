@@ -1,0 +1,44 @@
+[
+  {
+    "title": "Car fields",
+    "groups": [
+      {
+        "name": "gallery",
+        "repeat": true,
+        "fields": [
+          {
+            "name": "image",
+            "type": "image",
+            "label": "Image"
+          },
+          {
+            "name": "caption",
+            "type": "text",
+            "label": "Caption"
+          }
+        ]
+      },
+      {
+        "name": "details",
+        "repeat": true,
+        "fields": [
+          {
+            "name": "price",
+            "type": "text",
+            "label": "Price"
+          }
+        ]
+      }
+    ],
+    "conditions": {
+      "postTypes": [
+        "car"
+      ],
+      "postIds": [
+        10,
+        11,
+        12
+      ]
+    }
+  }
+]

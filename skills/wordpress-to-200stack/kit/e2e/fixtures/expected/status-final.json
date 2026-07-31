@@ -1,0 +1,14 @@
+{
+  "archive": "done",
+  "analyze": "done",
+  "mapping": "approved",
+  "scf-fields": "done",
+  "parse": "done",
+  "media": "approved",
+  "schema-import": "approved",
+  "implement": "done",
+  "fidelity": "approved",
+  "theme-crosscheck": "approved",
+  "verify": "done",
+  "publish": "pending"
+}

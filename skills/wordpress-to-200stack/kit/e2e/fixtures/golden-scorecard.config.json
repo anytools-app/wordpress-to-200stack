@@ -1,0 +1,45 @@
+{
+  "site": "site",
+  "outDir": "out",
+  "gates": [
+    {
+      "id": "routes",
+      "kind": "command",
+      "label": "ルート・301",
+      "run": ["node", "scripts/verify-routes.mjs"],
+      "assert": [
+        { "path": "unreachable.length", "equals": 0 },
+        { "path": "duplicateOutputPaths.length", "equals": 0 },
+        { "path": "canonicalCollisions.length", "equals": 0 },
+        { "path": "non301Rules.length", "equals": 0 }
+      ]
+    },
+    {
+      "id": "verify-content",
+      "kind": "file",
+      "label": "新旧照合 (wpkit verify)",
+      "file": "_scratch/verify-site/verify-report.json",
+      "assert": [
+        { "path": "missing.length", "equals": 0 },
+        { "path": "metaMismatches.length", "equals": 0 },
+        { "path": "brokenLinks.length", "equals": 0 }
+      ],
+      "allowMissingUrls": []
+    },
+    {
+      "id": "fidelity-approvals",
+      "kind": "file",
+      "label": "fidelity 承認網羅",
+      "check": "fidelity-approvals",
+      "approvals": "docs/fidelity-approvals.json",
+      "surfaces": "_scratch/fidelity/surfaces-summary.json"
+    },
+    {
+      "id": "static-export-attestation",
+      "kind": "attestation",
+      "label": "静的 export 確認",
+      "file": "docs/quality-attestations.json",
+      "key": "static-export"
+    }
+  ]
+}
