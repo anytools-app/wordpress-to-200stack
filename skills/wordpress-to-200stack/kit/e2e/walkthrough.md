@@ -27,14 +27,13 @@ npm run e2e
 WORK=_scratch/walkthrough
 mkdir -p "$WORK/_scratch" "$WORK/site/src/data" "$WORK/docs"
 cp -R e2e/fixtures/archive "$WORK/_scratch/archive"
-printf '{}\n' > "$WORK/_scratch/archive/meta.json"
 ```
 
 期待値は `e2e/fixtures/expected/*.json`、入力は `e2e/fixtures/golden-wxr.xml` と `e2e/fixtures/golden-mapping.config.ts` です。
 
 ## 0. archive — 現行凍結
 
-このケースでは上の `cp` が archive の代替です。`$WORK/_scratch/archive/inventory.json` に3 URL、各 `pages/*/page.html` と desktop/mobile screenshot、ルートの `meta.json` があることを確認します。
+このケースでは上の `cp` が archive の代替です。`$WORK/_scratch/archive/inventory.json` に3 URL、各 `pages/*/page.html` と desktop/mobile screenshot があることを確認します。
 
 ```bash
 node -pe 'JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")).urls.length' "$WORK/_scratch/archive/inventory.json"

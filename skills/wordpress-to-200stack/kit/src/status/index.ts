@@ -29,7 +29,7 @@ export type EnforceResult = { allowed: boolean; stateExists: boolean; missing: G
 
 type GateDefinition = { id: GateId; number: string; kind: GateKind; evidence?: string; command: string };
 const definitions: GateDefinition[] = [
-  { id: "archive", number: "0", kind: "machine", evidence: "_scratch/archive/meta.json", command: "wpkit archive <https://origin> -o _scratch/archive" },
+  { id: "archive", number: "0", kind: "machine", evidence: "_scratch/archive/inventory.json", command: "wpkit archive <https://origin> -o _scratch/archive" },
   { id: "analyze", number: "1", kind: "machine", evidence: "_scratch/analysis/census.json", command: "wpkit analyze <export.xml> -o _scratch/analysis" },
   { id: "mapping", number: "2", kind: "approval", command: "wpkit status approve mapping --by <名前>" },
   { id: "scf-fields", number: "2.5", kind: "machine", evidence: "_scratch/analysis/scf-definitions.json", command: "wpkit analyze <export.xml> -o _scratch/analysis" },

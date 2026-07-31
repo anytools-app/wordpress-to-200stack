@@ -10,7 +10,7 @@ const temporary: string[] = [];
 async function tempDir(): Promise<string> { const path = await mkdtemp(join(tmpdir(), "wpkit-status-")); temporary.push(path); return path; }
 async function json(path: string, value: unknown): Promise<void> { await mkdir(join(path, ".."), { recursive: true }); await writeFile(path, `${JSON.stringify(value, null, 2)}\n`); }
 async function fixture(root: string): Promise<void> {
-  await json(join(root, "_scratch/archive/meta.json"), {});
+  await json(join(root, "_scratch/archive/inventory.json"), {});
   await json(join(root, "_scratch/analysis/census.json"), {});
   await json(join(root, "_scratch/analysis/scf-definitions.json"), []);
   await json(join(root, "_scratch/ir/validation-report.json"), { errors: [], warnings: [{ code: "example" }] });
@@ -37,13 +37,13 @@ describe("wpkit status", () => {
 
   it("warns for missing recorded evidence and stale evidence", async () => {
     const root = await tempDir(); await fixture(root); await initStatus({ cwd: root });
-    await unlink(join(root, "_scratch/archive/meta.json"));
+    await unlink(join(root, "_scratch/archive/inventory.json"));
     let status = await getStatus({ cwd: root }); const archive = status?.gates.find((gate) => gate.id === "archive");
     expect(archive?.status).toBe("pending"); expect(archive?.warnings.join(" ")).toContain("evidence がありません");
-    await json(join(root, "_scratch/archive/meta.json"), {});
+    await json(join(root, "_scratch/archive/inventory.json"), {});
     const state = await loadMigrationState(root) as MigrationState;
     state.gates.archive!.at = "2000-01-01T00:00:00.000Z"; await saveMigrationState(root, state);
-    await utimes(join(root, "_scratch/archive/meta.json"), new Date("2026-01-01T00:00:00.000Z"), new Date("2026-01-01T00:00:00.000Z"));
+    await utimes(join(root, "_scratch/archive/inventory.json"), new Date("2026-01-01T00:00:00.000Z"), new Date("2026-01-01T00:00:00.000Z"));
     status = await getStatus({ cwd: root }); expect(status?.gates.find((gate) => gate.id === "archive")?.stale).toBe(true);
   });
 
