@@ -46,6 +46,16 @@ npm run wpkit -- archive <https://origin> -o ../_scratch/archive   # まず --li
 - `forms.json` が外部フォーム endpoint の台帳。`meta.json` の redirects 記録が 301 表の材料になる
 - 保存 HTML とスクショは、固定ページを書き起こす際の参照素材・レビュー比較対象として使う。実行時に HTML を再掲するデータソースにはしない
 - archive の Playwright クロールは DPR 1 で行うため、`srcset` の 2x 候補や `@2x` 資産はブラウザから要求されず、通常のキャッシュには入らない。保存 HTML の `srcset` とテーマ資産参照を棚卸しし、2x 候補を fetch-once キャッシュ経由で別途回収してからアーカイブ完了とする
+- **スクショは全ページ × 2 viewport(375/1280)× 中間幅(900 前後)まで収集する**。ピクセル比較ゲート
+  (§6.5 系統b)の基準は原則この収集物であり、後から凍結HTMLレンダで再生成するより忠実で安い。
+  中間幅は「PC min-width と可変レイアウトの境界」で起きる差(実案件: min-width:1080 が無く
+  Google Maps 埋め込みが縮んで場所カードが簡易チップに縮退)を初回から検出するために要る
+- **runtime-facts.json を同時収集する**: 実行時にしか分からない事実 — `document.fonts` の内訳
+  (family / weight / status。ライセンスWebフォントは凍結レンダで再現できないため実態はここが正本)、
+  スライダー等が実際に付与するクラス名(CSS の死にルール判定の材料。実案件: テーマ CSS の
+  `.is-active` ズーム規則は slick が `slick-active` を付与するため本番では発火しない死にルールだった)、
+  主要アニメ対象の computed transform / animation のサンプル。取得は archive クロールと同一アクセスで行い
+  fetch-once を守る
 
 ### 原点サーバー保護(fetch-once。違反すると本番を止める)
 
@@ -72,11 +82,22 @@ npm run wpkit -- analyze <export.xml> -o ../_scratch/analysis
 ```
 
 - `census.md` で移行スコープをユーザーに確認する(どの post_type を移行/廃止するか、捨てる URL は 404 か 301 か)
+- **テーマCSSから2つのインベントリを最初に抽出し、`_scratch/analysis/` に固定する**(後段ゲートの必須入力):
+  - **タイポグラフィトークン表**: 原文のユーティリティ書体クラス(例: `.font-a`=Inter 400、
+    `.font-b`=Noto Serif 700、`.font-c`=Lato 300 italic)と、見出し・ラベル類の色/サイズ規則。
+    実案件ではこの対応崩れが複数ページ・複数ラウンドの差し戻しになった(§6.5 系統d の基準になる)
+  - **アニメ/ホバー全規則インベントリ**: transition / animation / :hover / :focus を持つ全規則の一覧。
+    実案件では原文125 transition / 69 hover に対し built 27 / 15 しか移植されず差し戻しになった
+    (§6.5 系統f の基準になる)。**死にルール判定を併記する**: セレクタが実DOM・実JS付与クラス
+    (runtime-facts.json)にマッチしない規則は「本番で発火しない」ため移植対象から外す
 - microCMS の API 数は §5 のプラン上限から逆算する。少数件の型は kind 統合
 - config の書式・型の決め方チェックリストは `templates.md`。**フィールド型は必ずサンプル実値で決める**:
   SCF 画像フィールドは attachment の wp_id が入る(`type:"image"` で kit が URL 解決)、wp_id 参照は relation、
   "0"/"1" は boolean、価格は単位に注意(万円単位の実例あり)
-- microCMS 対象の記事本文は `legacyBodyHtml`(HTML文字列)。リッチエディタに入れない
+- microCMS 対象の記事本文は `legacyBodyHtml` を **richEditorV2 で持つのが既定**(クライアントが
+  管理画面で編集を続けられる)。richEditorV2 はサニタイザが強く、**入稿前に「サニタイザ往復探査」
+  (§3.5)で生存構造を確定し、落ちる構造は IR 後処理+レンダラ補償で吸収する**。
+  編集運用が不要な read-only アーカイブ案件に限り、素の textArea(HTML文字列)でもよい
 
 ### 2.5 SCF 定義の復元と現行管理画面のフィールド精査
 
@@ -126,6 +147,33 @@ npm run wpkit -- parse --config ../mapping.config.ts -o ../_scratch/ir
   構造的に不可視。実案件で thanks 7枚がこれで漏れた(検出は WXR の page 全件と `out/` の突き合わせ
   1コマンドだった)。旧URL台帳(verify:routes)は CMS ルート由来で page 型を守らないことに注意
 - 固定ページ(通常は WordPress の `page`)は microCMS に入れない。`exclude.postTypes` で除外し、移行後も存在する URL は `linkCheck.assumeExistPostTypes` / `assumeExistPaths` に登録する。提供は App Router の専用ルート(`src/app/<route>/page.tsx` + `page.module.css` + `metadata`)としてコード実装する
+
+### 3.5 サニタイザ往復探査(スキーマ確定の前提。CMS が本文をどう変えるかを実測で確定する)
+
+保存先 CMS のサニタイザは入稿 HTML を**保存のたびに不可逆変換**する。仕様書には載っておらず、
+推測で設計すると入稿後に構造が壊れてから気づく。**一時レコードへ疑わしい構造を PUT/PATCH → GET で
+往復させ、「何が生存し何が落ちるか」を実測した仕様書(`_scratch/probe/sanitizer-spec.json`)を作ってから**
+IR 変換・スキーマ・レンダラ設計を確定する(探査用レコードは終了後に削除)。
+
+microCMS richEditorV2 の実測済み仕様(案件B。以後の案件は差分だけ探査すればよい):
+
+1. `div` / `aside` / `section` / `figure`(入稿時)と**全 class 属性を除去**
+   → 装飾囲みは `blockquote` 等の生存タグへ IR 後処理で変換し、レンダラがマーカー
+   (先頭 p>strong の定型文など)から class を復元する
+2. **img の width/height を保存のたびアセット原寸へ強制正規化し、style 属性も除去**
+   → 原文の表示用サイズ(例: 494x800 の画像を 230x373 で表示)は CMS 側に保持できない。
+   原文HTMLから寸法 map を抽出し(`src/data/legacy-img-dimensions.json`)、レンダラの
+   sanitize 段で復元する
+3. **テキストは PATCH では再正規化されない**(PUT 時のみ)。「…」→「...」等の文字正規化は
+   PATCH で原文へ戻せる
+4. `<p>テキスト<img>テキスト</p>` の混在段落を **p / figure / p に分割**し空 p を挿入する
+   (旧世代記事で構造差になる。完全復元は不可能なので fidelity 承認台帳で凍結する)
+5. figure 化された画像は margin 0 になる → 原文 `p>img` の行ボックス+余白
+   (実測: 画像1枚あたり +28px)をレンダラ側 CSS(`.content figure` 規則)で補償する
+
+**レンダラ補償パックはテンプレ既定に含める**: マーカー復元・寸法 override map・本文要素 CSS
+(ul/ol 枠ボックス・li 罫線・figure 余白・blockquote・table)。本文系の見た目は
+「CMS 保存後の HTML + この補償」で原文と一致させるのが完了条件(§6.5 系統b/cで機械検証)。
 
 ### 4. media(ゲート2: missing を人が確認)
 
@@ -326,6 +374,14 @@ export function SiteLink({ href, ...props }: ComponentPropsWithoutRef<"a">) {
 5. 対象ページ・部品に関係する `recipes.md` のレシピを指示書へ本文ごと転記する。リンクだけにしない
 6. Codex sandbox は 127.0.0.1 への listen も不可(`listen EPERM`)。ローカルサーバーが必要な
    ピクセル比較・DOM 実測は司令塔が実行し、差分を委任先へ戻す往復にする
+7. **指示書に載せる原文値(テキスト・CSS値・DOM構造)は司令塔が機械抽出したものだけにする**。
+   「原文を参考に書き起こして」と委任すると無意識の校正(語尾・全角半角・約物)が混入する
+   (実案件で複数件)。テキストは実行後DOMから抽出、CSS はカスケード勝者値(生成元ファイル・
+   メディアクエリ文脈込み)を確定して貼る。装飾用の空要素(span矢印)や display:none の
+   SEO用要素も「見えないから」と省かせない(指示書テンプレの移植チェックリスト参照)
+8. **委任先が書き込み中のツリーで `git add -A` しない(ツリー凍結)**。並行する別作業のコミットが
+   委任成果を巻き込み、レビュー前の変更が履歴に入る事故が実際に起きた。コミットは委任の
+   完了通知+変更ファイルのマニフェスト照合後に行う
 
 レビューは司令塔が typecheck / build / Playwright の desktop・mobile 実画面比較で行う。
 
@@ -335,7 +391,31 @@ export function SiteLink({ href, ...props }: ComponentPropsWithoutRef<"a">) {
 
 承認記録: `wpkit status approve fidelity --by <名前>`
 
-忠実性の完了条件は**原文とのピクセル比較の収束 + 機能一致**。用途の異なる2本を混同しない。
+忠実性の完了条件は**6系統の照合がすべて「残差ゼロ or 承認台帳登録済み」になること**。
+初回パイプラインが寸法ブロックだけで scorecard PASS になり、その後テキスト・アニメ・書体・
+静的属性の差し戻しが13ラウンド続いた実案件(案件B)の教訓として、系統は独立に全部回す:
+
+| 系統 | 照合対象 | ツール(テンプレ `scripts/`) | 検出できた実差の例 |
+|---|---|---|---|
+| (a) 寸法ブロック | 代表面の DOM y/h(ゼロ基準) | `measure-blocks.mjs` | セクション高・累積 dy |
+| (b) ピクセル | 全ページ×2vp×中間幅のスクショ差分 | `fidelity-scan.mjs`(基準=§0収集 or `render-archive-baselines.mjs`) | アイキャッチのクロップ方式、白帯幅、カラム実効幅 |
+| (c) 可視テキスト | 実行後DOMの全文(結合+行分割) | `_textdiff.mjs` | 文言ドリフト、`<br>`位置、記号(○/◯)、ページャ順 |
+| (d) トークン | 書体クラス対応要素の computed font/color | analyze のトークン表と CDP 照合 | font-b 見出しが別書体、色の取り違え |
+| (e) 静的属性 | メタ・リンク・画像属性・非表示要素・head資産 | `audit-archive-vs-built.mjs` | 非表示SEO用h1の欠落、favicon欠落、alt差 |
+| (f) 動き | アニメ/ホバー規則数+CDP実挙動 | analyze のインベントリと突き合わせ | transition 125→27、ホバー未移植、死にルールの誤移植 |
+
+**ハーネスの決定化はデフォルトで全系統に適用する**(非決定な計測は偽差分でゲートを無力化する):
+タイミング依存UI(通知バー等)の両側対称非表示(`MEASURE_HIDE_SELECTORS`+sessionStorage注入)、
+計測前の `scroll-behavior:auto` 強制と scrollY==0 待ち、入場アニメの両側最終状態固定
+(`MEASURE_EXTRA_CSS`)、凍結レンダで再現できない Webフォントの両側中和、CMS画像URLの
+fetch-once キャッシュ事前充填(built 側だけ画像404になる偽差分の防止)。
+
+**エビデンスは2層で保存する**: 作業バッファは `_scratch/`(gitignore)、**合否判定に使った
+結果JSONは `docs/evidence/<gate>/` へ確定コミット**する。scorecard は evidence 側を読む。
+これで「ゲートを通した証拠」がリポジトリに残り、振り返り・引き継ぎ・スキル回帰テストが
+ローカル環境に依存しない。
+
+以下、系統(a)(b)の詳細。用途の異なる2本を混同しない。
 
 #### fidelity: 原文アーカイブとの比較
 
