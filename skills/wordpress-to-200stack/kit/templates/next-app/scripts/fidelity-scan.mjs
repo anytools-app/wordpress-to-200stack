@@ -17,18 +17,18 @@ const outDir = join(project, "out");
 const fidelityDir = join(project, "_scratch", "fidelity");
 // 凍結アーカイブは fidelity の参照入力専用。
 const archiveDir = process.env.WPKIT_ARCHIVE_DIR ?? join(project, "_scratch", "archive");
-const baselineRoot = join(archiveDir, "pages");
+const baselineRoot = process.env.WPKIT_BASELINE_DIR ?? join(archiveDir, "pages");
 const currentRoot = join(fidelityDir, "current");
 const diffsRoot = join(fidelityDir, "diffs");
 
 function usage(message) {
   if (message) console.error(message);
-  console.error("Usage: node scripts/fidelity-scan.mjs [--limit N] [--only <surfaceId>] [--concurrency 4] [--port 8899] [--keep-diffs 50]");
+  console.error("Usage: node scripts/fidelity-scan.mjs [--limit N] [--only <surfaceId>] [--concurrency 4] [--port 8899] [--keep-diffs 50] [--evidence <json>]");
   process.exit(1);
 }
 
 function parseArgs(argv) {
-  const options = { limit: Infinity, only: null, concurrency: 4, port: 8899, keepDiffs: 50 };
+  const options = { limit: Infinity, only: null, concurrency: 4, port: 8899, keepDiffs: 50, evidence: null };
   for (let index = 0; index < argv.length; index += 1) {
     const flag = argv[index];
     if (flag === "--only") options.only = argv[++index] ?? usage("--only requires a surface id");
@@ -39,7 +39,8 @@ function parseArgs(argv) {
       if (flag === "--concurrency") options.concurrency = value;
       if (flag === "--port") options.port = value;
       if (flag === "--keep-diffs") options.keepDiffs = value;
-    } else usage(`Unknown option: ${flag}`);
+    } else if (flag === "--evidence") options.evidence = resolve(argv[++index] ?? usage("--evidence requires a JSON path"));
+    else usage(`Unknown option: ${flag}`);
   }
   return options;
 }
@@ -49,7 +50,7 @@ function outputFile(pathname) {
 }
 
 function encodedPath(pathname) {
-  return encodeURIComponent(pathname);
+  return encodeURIComponent(pathname === "/" ? "/" : `${pathname.replace(/\/+$/, "")}/`);
 }
 
 function imagePath(root, pathname, viewport) {
@@ -87,7 +88,23 @@ async function capture(context, baseUrl, pathname, destination) {
   try {
     await withTimeout((async () => {
       await page.goto(new URL(pathname, baseUrl).href, { waitUntil: "networkidle", timeout: 25_000 });
-      await page.evaluate(async () => { await document.fonts.ready; });
+      await page.evaluate(async () => {
+        await document.fonts.ready;
+        document.documentElement.style.setProperty("scroll-behavior", "auto", "important");
+        const step = Math.max(1, Math.round(window.innerHeight * 0.85));
+        const bottom = Math.max(0, document.documentElement.scrollHeight - window.innerHeight);
+        for (let y = 0; y < bottom; y += step) {
+          window.scrollTo(0, y);
+          await new Promise((resolveFrame) => requestAnimationFrame(() => resolveFrame()));
+        }
+        window.scrollTo(0, bottom);
+        await new Promise((resolveFrame) => requestAnimationFrame(() => resolveFrame()));
+        window.scrollTo(0, 0);
+        while (window.scrollY !== 0) {
+          window.scrollTo(0, 0);
+          await new Promise((resolveFrame) => requestAnimationFrame(() => resolveFrame()));
+        }
+      });
       await mkdir(join(destination, ".."), { recursive: true });
       await page.screenshot({ path: destination, fullPage: true, type: "png" });
     })(), 30_000, pathname);
@@ -225,10 +242,21 @@ async function main() {
     for (let offset = 0; offset < selected.length; offset += 50) {
       const batch = selected.slice(offset, offset + 50);
       const contexts = Object.fromEntries(await Promise.all(Object.entries(viewports()).map(async ([name, viewport]) => {
-        const context = await browser.newContext({ viewport, deviceScaleFactor: 1, reducedMotion: "reduce" });
+            const context = await browser.newContext({ viewport, deviceScaleFactor: 1, reducedMotion: "reduce" });
+            if (process.env.MEASURE_SESSION_STORAGE) {
+              let entries;
+              try { entries = JSON.parse(process.env.MEASURE_SESSION_STORAGE); } catch { throw new Error("MEASURE_SESSION_STORAGE must be a JSON object"); }
+              if (!entries || typeof entries !== "object" || Array.isArray(entries) || Object.values(entries).some((value) => typeof value !== "string")) throw new Error("MEASURE_SESSION_STORAGE must be a JSON object with string values");
+              await context.addInitScript((storageEntries) => { for (const [key, value] of Object.entries(storageEntries)) sessionStorage.setItem(key, value); }, entries);
+            }
+            const injectedCss = [process.env.MEASURE_EXTRA_CSS ?? "", process.env.MEASURE_HIDE_SELECTORS ? `${process.env.MEASURE_HIDE_SELECTORS} { display: none !important; }` : ""].filter(Boolean).join("\n");
+            if (injectedCss) await context.addInitScript((styleText) => {
+              const install = () => { const style = document.createElement("style"); style.textContent = styleText; document.documentElement.appendChild(style); };
+              if (document.documentElement) install(); else addEventListener("DOMContentLoaded", install);
+            }, injectedCss);
         // 原点サーバー保護: 全外部リクエストをfetch-onceキャッシュ経由に。動的埋め込み(YouTube等)だけ素通し。
         const originHost = process.env.WPKIT_ORIGIN ? new URL(process.env.WPKIT_ORIGIN).hostname : null;
-        await installCacheRoutes(context, { hosts: [originHost, "fonts.googleapis.com", "fonts.gstatic.com"].filter(Boolean), passthrough: ["youtube.com", "ytimg.com", "googlevideo.com"] });
+        await installCacheRoutes(context, { hosts: [originHost, "fonts.googleapis.com", "fonts.gstatic.com", "images.microcms-assets.io"].filter(Boolean), passthrough: ["youtube.com", "ytimg.com", "googlevideo.com"] });
         return [name, context];
       })));
       try {
@@ -240,6 +268,10 @@ async function main() {
     await writeTopDiffs(results, options.keepDiffs);
     await mkdir(fidelityDir, { recursive: true });
     await writeFile(join(fidelityDir, "scan.json"), `${JSON.stringify(results, null, 2)}\n`);
+    if (options.evidence) {
+      await mkdir(join(options.evidence, ".."), { recursive: true });
+      await writeFile(options.evidence, `${JSON.stringify(results, null, 2)}\n`);
+    }
     printSummary(results);
   } finally {
     await browser?.close();

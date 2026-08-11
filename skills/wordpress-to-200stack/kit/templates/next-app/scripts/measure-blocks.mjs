@@ -20,12 +20,12 @@ const PASSTHROUGH = ["youtube.com", "ytimg.com", "googlevideo.com"];
 
 function usage(message) {
   if (message) console.error(message);
-  console.error("Usage: WPKIT_ARCHIVE_DIR=... WPKIT_ORIGIN=https://example.com node scripts/measure-blocks.mjs [--config blocks.config.json] [--only <surfaceId>] [--viewport desktop|mobile] [--port 8899] [--strict]");
+  console.error("Usage: WPKIT_ARCHIVE_DIR=... WPKIT_ORIGIN=https://example.com node scripts/measure-blocks.mjs [--config blocks.config.json] [--only <surfaceId>] [--viewport desktop|mobile] [--port 8899] [--strict] [--evidence <json>]");
   process.exit(1);
 }
 
 function parseArgs(argv) {
-  const options = { config: join(project, "blocks.config.json"), only: null, viewport: null, port: 8899, strict: false };
+  const options = { config: join(project, "blocks.config.json"), only: null, viewport: null, port: 8899, strict: false, evidence: null };
   for (let index = 0; index < argv.length; index += 1) {
     const flag = argv[index];
     if (flag === "--config") options.config = resolve(argv[++index] ?? usage("--config requires a path"));
@@ -39,6 +39,7 @@ function parseArgs(argv) {
       if (!Number.isInteger(port) || port < 1 || port > 65535) usage("--port requires a valid port number");
       options.port = port;
     } else if (flag === "--strict") options.strict = true;
+    else if (flag === "--evidence") options.evidence = resolve(argv[++index] ?? usage("--evidence requires a JSON path"));
     else usage(`Unknown option: ${flag}`);
   }
   return options;
@@ -112,9 +113,38 @@ async function closeServer(server) {
 
 async function createContext(browser, viewport, originHost, documentUrl, html) {
   const context = await browser.newContext({ viewport, deviceScaleFactor: 1, reducedMotion: "reduce" });
+  if (process.env.MEASURE_SESSION_STORAGE) {
+    let entries;
+    try {
+      entries = JSON.parse(process.env.MEASURE_SESSION_STORAGE);
+    } catch {
+      throw new Error("MEASURE_SESSION_STORAGE must be a JSON object");
+    }
+    if (!entries || typeof entries !== "object" || Array.isArray(entries) || Object.values(entries).some((value) => typeof value !== "string")) {
+      throw new Error("MEASURE_SESSION_STORAGE must be a JSON object with string values");
+    }
+    await context.addInitScript((storageEntries) => {
+      for (const [key, value] of Object.entries(storageEntries)) sessionStorage.setItem(key, value);
+    }, entries);
+  }
+  const injectedCss = [
+    process.env.MEASURE_EXTRA_CSS ?? "",
+    process.env.MEASURE_HIDE_SELECTORS ? `${process.env.MEASURE_HIDE_SELECTORS} { display: none !important; }` : "",
+  ].filter(Boolean).join("\n");
+  if (injectedCss) {
+    await context.addInitScript((styleText) => {
+      const install = () => {
+        const style = document.createElement("style");
+        style.textContent = styleText;
+        document.documentElement.appendChild(style);
+      };
+      if (document.documentElement) install();
+      else addEventListener("DOMContentLoaded", install);
+    }, injectedCss);
+  }
   // Keep exactly the same cache hosts and dynamic-media passthrough as fidelity-scan.mjs.
   await installCacheRoutes(context, {
-    hosts: [originHost, "fonts.googleapis.com", "fonts.gstatic.com"].filter(Boolean),
+    hosts: [originHost, "fonts.googleapis.com", "fonts.gstatic.com", "images.microcms-assets.io"].filter(Boolean),
     passthrough: PASSTHROUGH,
   });
   // Later registrations are checked first, so this document always comes from the frozen archive.
@@ -128,6 +158,7 @@ async function initializePage(page, url) {
   await page.goto(url, { waitUntil: "networkidle", timeout: 25_000 });
   await page.evaluate(async () => {
     await document.fonts.ready;
+    document.documentElement.style.setProperty("scroll-behavior", "auto", "important");
     const step = Math.max(1, Math.round(window.innerHeight * 0.85));
     const bottom = Math.max(0, document.documentElement.scrollHeight - window.innerHeight);
     for (let y = 0; y < bottom; y += step) {
@@ -137,6 +168,10 @@ async function initializePage(page, url) {
     window.scrollTo(0, bottom);
     await new Promise((resolveFrame) => requestAnimationFrame(() => resolveFrame()));
     window.scrollTo(0, 0);
+    while (window.scrollY !== 0) {
+      window.scrollTo(0, 0);
+      await new Promise((resolveFrame) => requestAnimationFrame(() => resolveFrame()));
+    }
     await new Promise((resolveFrame) => requestAnimationFrame(() => resolveFrame()));
   });
 }
@@ -299,6 +334,13 @@ async function main() {
       } finally {
         await Promise.all(Object.values(surfaceContexts).map((context) => context.close()));
       }
+    }
+    const summary = { generatedAt: new Date().toISOString(), summaries };
+    await mkdir(fidelityDir, { recursive: true });
+    await writeFile(join(fidelityDir, "blocks-summary.json"), `${JSON.stringify(summary, null, 2)}\n`);
+    if (options.evidence) {
+      await mkdir(join(options.evidence, ".."), { recursive: true });
+      await writeFile(options.evidence, `${JSON.stringify(summary, null, 2)}\n`);
     }
     console.log(JSON.stringify(summaries, null, 2));
     if (hasMeasurementError) process.exitCode = 1;
