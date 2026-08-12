@@ -7,6 +7,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { chromium } from "playwright";
 import { installCacheRoutes } from "./lib/remote-cache.mjs";
+import { artifactBinding, sameArtifactBinding, verifyBuildArtifact } from "./lib/build-artifact.mjs";
 import { createCachedServer } from "./serve-cached.mjs";
 
 const project = resolve(import.meta.dirname, "..");
@@ -253,7 +254,7 @@ function markdownReport(result) {
   return `${lines.join("\n")}\n`;
 }
 
-async function measureSurface({ surface, path, blocks }, contexts, origin, port, selectedViewports, sourcePath) {
+async function measureSurface({ surface, path, blocks }, contexts, origin, port, selectedViewports, sourcePath, binding) {
   const viewports = {};
   for (const viewport of selectedViewports) {
     const context = contexts[viewport];
@@ -266,6 +267,7 @@ async function measureSurface({ surface, path, blocks }, contexts, origin, port,
     surface,
     path,
     originSource: sourcePath,
+    binding,
     viewports,
   };
   result.nonZero = nonZeroCount(viewports);
@@ -292,6 +294,14 @@ async function main() {
     usage("WPKIT_ORIGIN must be an absolute URL");
   }
   if (!existsSync(outDir)) throw new Error(`out/ is missing at ${outDir}; npm run build が先です`);
+  const artifact = await verifyBuildArtifact({
+    outDirectory: outDir,
+    artifactPath: resolve(process.env.WPKIT_BUILD_ARTIFACT ?? join(project, "_scratch", "build-artifact.json")),
+    repository: project,
+    verifySource: true,
+  });
+  if (!artifact.matches) throw new Error(`build artifact mismatch: ${artifact.reason}`);
+  const binding = artifactBinding(artifact.recorded);
 
   let rawConfig;
   try {
@@ -328,14 +338,23 @@ async function main() {
         surfaceContexts[viewport] = context;
       }
       try {
-        const measured = await measureSurface({ ...entry, blocks: [...config.common, ...entry.blocks] }, surfaceContexts, origin, options.port, selectedViewports, input.sourcePath);
+        const measured = await measureSurface({ ...entry, blocks: [...config.common, ...entry.blocks] }, surfaceContexts, origin, options.port, selectedViewports, input.sourcePath, binding);
         summaries.push({ surface: entry.surface, path: entry.path, nonZero: measured.result.nonZero, pass: measured.result.pass, json: measured.jsonPath, markdown: measured.markdownPath });
         if (!allStatusesOk(measured.result.viewports)) hasMeasurementError = true;
       } finally {
         await Promise.all(Object.values(surfaceContexts).map((context) => context.close()));
       }
     }
-    const summary = { generatedAt: new Date().toISOString(), summaries };
+    const artifactAfter = await verifyBuildArtifact({
+      outDirectory: outDir,
+      artifactPath: resolve(process.env.WPKIT_BUILD_ARTIFACT ?? join(project, "_scratch", "build-artifact.json")),
+      repository: project,
+      verifySource: true,
+    });
+    if (!artifactAfter.matches || !sameArtifactBinding(artifact.recorded, artifactAfter.recorded)) {
+      throw new Error(`build artifact changed during measurement: ${artifactAfter.reason ?? "binding mismatch"}`);
+    }
+    const summary = { generatedAt: new Date().toISOString(), binding, summaries };
     await mkdir(fidelityDir, { recursive: true });
     await writeFile(join(fidelityDir, "blocks-summary.json"), `${JSON.stringify(summary, null, 2)}\n`);
     if (options.evidence) {

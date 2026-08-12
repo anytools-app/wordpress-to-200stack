@@ -79,27 +79,27 @@ dev 中の microCMS 更新はサーバー再起動不要で、最大5秒後の�
 - command ゲートは過去レポートを読まず、毎回 `execFile` 形式で実行して鮮度を保証する。file ゲートは既存の結果ファイルを読む
 - fidelity / 実機レビュー / 手動計測は人の判断そのものを自動化しない。機械チェックは記録の存在・必要項目・網羅だけに限定する
 - required ゲートの `NOT_RUN` は silent skip せず総合 `FAIL` にする。`required: false` は表示するが総合判定へ影響しない
-- `out/` は相対パス順と内容ハッシュから決定的な build hash を計測し、実機レビュー台帳の対象 build と照合する。不一致は v1 では警告であり FAIL にはしない
+- build/postbuild 後に `out/` のSHA-256、fileCount、bytes、source revisionをartifactへ固定する。archive-built、fidelity measurement、live review、scorecardは同じartifactへ束縛し、不一致や監査後mutationはFAILにする
 
-人の記録は次の JSON 形式を使う。fidelity は surface ごとに `date` と `by` を持つ承認がすべて存在すること、live review は `date` / `reviewer` / 1件以上の `ok` scenario / 解消済み findings を条件にする。attestation は対応 key の `date` と `by` があれば `ATTESTED` とする。
+人の記録は次の JSON 形式を使う。fidelity は surface ごとに `date` と `by` を持つ承認がすべて存在すること、live review は `date` / `reviewer` / 1件以上の `ok` scenario / 解消済み findings / full artifact binding を条件にする。新規既定のa11y/Lighthouse attestationも対応 keyの`date` / `by`とcurrent full artifact bindingが一致した場合だけ`ATTESTED`とする。既存configは`bindArtifact`未指定時の読み込み互換を維持する。
 
 ```json
-{ "approvals": [{ "surface": "tpl.works.detail", "date": "2026-07-28", "by": "名前", "note": "任意" }] }
+{ "approvals": [{ "surface": "tpl.works.detail", "date": "2026-07-28", "by": "名前", "measurements": { "source": "site/_scratch/fidelity/blocks-tpl.works.detail.json" }, "note": "任意" }] }
 ```
 
 ```json
-{ "date": "2026-07-28", "reviewer": "名前", "build": "out の内容ハッシュ", "scenarios": [{ "name": "フォーム送信", "result": "ok" }], "findings": [{ "summary": "確認済み", "resolved": true }] }
+{ "date": "2026-07-28", "reviewer": "名前", "build": "out の内容ハッシュ", "binding": { "buildHash": "SHA-256", "fileCount": 1, "bytes": 1, "source": { "commit": "Git commit", "dirty": false, "worktreeHash": "SHA-256" } }, "scenarios": [{ "name": "フォーム送信", "result": "ok" }], "findings": [{ "summary": "確認済み", "resolved": true }] }
 ```
 
-`scenarios` のうち機械化済み分はテンプレ同梱の `live-scenarios.mjs --record` が転記し、`findings` は人が記録する。
+`scenarios` のうち機械化済み分と `binding` はテンプレ同梱の `live-scenarios.mjs --record` が検証済みartifactから転記し、`findings` は人が記録する。
 
 ```json
-{ "a11y": { "date": "2026-07-28", "by": "名前", "values": { "violations": 0 }, "note": "任意" }, "lighthouse": { "date": "...", "by": "...", "values": {} } }
+{ "a11y": { "date": "2026-07-28", "by": "名前", "binding": { "buildHash": "SHA-256", "fileCount": 1, "bytes": 1, "source": { "commit": "Git commit", "dirty": false, "worktreeHash": "SHA-256" } }, "values": { "violations": 0 }, "note": "任意" }, "lighthouse": { "date": "...", "by": "...", "binding": { "buildHash": "SHA-256", "fileCount": 1, "bytes": 1, "source": { "commit": "Git commit", "dirty": false, "worktreeHash": "SHA-256" } }, "values": {} } }
 ```
 
 ### status: 移行進行台帳と工程ナビゲーション
 
-`wpkit status` は案件ルートでコミットする `migration-state.json` を読み、固定順の移行 gate を工程表と次工程として示す。machine gate は台帳の自己申告でなく成果物(evidence)から毎回導出し、approval gate だけを `wpkit status approve <gate> --by <名前>` の記録で通過させる。成果物が記録より新しい場合は stale として再確認を促す。台帳は開始ディレクトリから親へ探索し、`.git` のあるリポジトリ境界を検査後に探索を打ち切る。
+`wpkit status` は案件ルートでコミットする `migration-state.json` を読み、固定順の移行 gate を工程表と次工程として示す。machine gate は台帳の自己申告でなく成果物(evidence)から毎回導出し、approval gate だけを `wpkit status approve <gate> --by <名前>` の記録で通過させる。status自身はbuild artifactと現在の`out/`のSHA-256、fileCount、bytes、source revision、およびscorecard reportのartifact bindingを照合する。fidelity / live review / quality attestationのbindingはscorecardが検証し、scorecardがFAILまたはstaleならstatusのverify gateを`pending`へ戻す。台帳は開始ディレクトリから親へ探索し、`.git` のあるリポジトリ境界を検査後に探索を打ち切る。
 
 これは scorecard を重ねて集約する仕組みではない。`verify` gate は既存 scorecard の総合 `PASS` と build hash を evidence として参照するだけで、検証を再実行しない。台帳が存在する案件に限り、media upload / import / verify / scorecard は前提 gate を CLI 層で強制する。既存案件は台帳を作るまで完全に opt-in であり、例外実行は `--force` と台帳記録を必要とする。
 
@@ -191,7 +191,7 @@ microCMS の前提:
 
 ## ゴールデンケース E2E
 
-`kit/e2e/golden.test.ts` は、WXR分析からテンプレート build、verify、scorecard、12ゲートの確定までを8工程で通す必須回帰ゲートである。
+`kit/e2e/golden.test.ts` は、WXR分析からテンプレート build、verify、scorecard、全status gateの確定までを8工程で通す必須回帰ゲートである。
 単体テストは各コマンド・変換規則・異常系の契約を細かく固定し、golden E2E はそれらをつないだ成果物契約を固定する。
 入力・期待値は `e2e/fixtures/` にチェックインし、ネットワークなしで同一入力から同一結果になるようにする。
 実 microCMS への schema 登録・content import・media upload は mock 境界とし、HTTP の POST / PUT / PATCH と relation の二段階更新を検証する。
@@ -263,6 +263,15 @@ viewport・`reducedMotion: "reduce"`・キャッシュ interception 条件で測
 決定的な合格判定の入力であり、`blocks-<surface>.json` は `fidelity-approvals.json` へ転記する値の出所を
 機械化する。ただし、意図的差分を承認する判断自体は人が行う。
 
+`archive-built-audit.mjs` は静的DOMテキスト・静的属性・リンク・メタ/JSON-LD値・semantics・CTA・画像 identity を同じ
+決定的 observation 形式へ収集する。入力 route は archive inventory、route ledger、built output の和集合で、
+archive が非200または status 不明でも built output が存在すれば観測する。各200 routeは body全体と案件configの
+tracked surfaceを比較し、common chromeとsurface外画像を除外しない。既存UIの差分は自動補正せず、observationの
+SHA-256、route、code、severityに完全一致するdecision ledgerだけを裁定根拠とする。Blocking observationと
+invalid / unused / duplicate / mismatch decisionは抑制できない。
+静的DOMテキストlaneはhidden/aria-hiddenと明示exclude selectorを除くが、computed CSS visibilityやJS実行後状態を
+測るものではない。それらはPlaywright/CDP laneへ分離する。
+
 ### ネイティブページの提供設計
 
 - 固定ページは1ページずつ JSX とページローカル CSS Modules へ書き起こす。記事は一覧・詳細・テンプレの所有境界でModuleを分ける
@@ -280,8 +289,8 @@ viewport・`reducedMotion: "reduce"`・キャッシュ interception 条件で測
   旧URLは301の入口であって内部リンクの行き先ではない
 - 原文が`WP_Query`で引いていた繰り返しブロックは**固定配列に焼き込まず**repository経由で実装する。
   CMS駆動にした箇所では派生サイズ画像(`-WxH.ext`)を使わない(新規レコードには存在しないため)
-- 自前カルーセルの非アクティブスライドは`aria-hidden`に加えて`inert`を付ける。アイコンのみのリンクと
-  背景画像だけを包むリンクには`aria-label`、本文iframeには`title`を与える
+- 新規UIでは、自前カルーセルの非アクティブスライドへ`aria-hidden`+`inert`、アイコン/背景画像だけの
+  リンクへ`aria-label`、iframeへ`title`を与える。archive由来の既存UI属性は原文保持を既定とし、改善はhash decisionで裁定する
 
 ## スキル(wp-migrate)のワークフロー
 

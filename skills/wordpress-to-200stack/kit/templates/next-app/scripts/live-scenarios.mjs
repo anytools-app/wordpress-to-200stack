@@ -5,7 +5,8 @@ import { pathToFileURL } from "node:url";
 import { chromium } from "playwright";
 import { createCachedServer } from "./serve-cached.mjs";
 import { installCacheRoutes } from "./lib/remote-cache.mjs";
-import { DEFAULT_VIEWPORT, evaluateExpect, formatMarkdown, formatResultsJson, hashBuildOutput, mergeLiveReview, validateConfig } from "./lib/live-scenarios-core.mjs";
+import { artifactBinding, verifyBuildArtifact } from "./lib/build-artifact.mjs";
+import { DEFAULT_VIEWPORT, evaluateExpect, formatMarkdown, formatResultsJson, mergeLiveReview, validateConfig } from "./lib/live-scenarios-core.mjs";
 
 const project = resolve(import.meta.dirname, "..");
 function usage(message) {
@@ -287,7 +288,14 @@ async function main() {
       try { existing = JSON.parse(await readFile(recordPath, "utf8")); } catch (error) { if (error?.code !== "ENOENT") throw error; }
       const now = new Date();
       const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
-      const merged = mergeLiveReview(existing, results, await hashBuildOutput(options.outDir), today);
+      const verifiedArtifact = await verifyBuildArtifact({
+        outDirectory: options.outDir,
+        artifactPath: resolve(process.env.WPKIT_BUILD_ARTIFACT ?? join(project, "_scratch", "build-artifact.json")),
+        repository: project,
+        verifySource: true,
+      });
+      if (!verifiedArtifact.matches) throw new Error(`build artifact mismatch: ${verifiedArtifact.reason}`);
+      const merged = mergeLiveReview(existing, results, artifactBinding(verifiedArtifact.recorded), today);
       await mkdir(dirname(recordPath), { recursive: true });
       await writeFile(recordPath, `${JSON.stringify(merged, null, 2)}\n`);
       if (!existing) console.warn("docs/live-review.json を新規作成しました。reviewer と findings は人が記入してください（reviewer が空のままでは scorecard は FAIL します）。");

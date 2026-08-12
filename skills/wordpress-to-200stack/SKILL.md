@@ -1,6 +1,6 @@
 ---
 name: wordpress-to-200stack
-description: WordPress サイトを microCMS + formrun + Next.js 静的エクスポートへ移行し、固定ページ・記事テンプレをネイティブ実装(CSS Modules)して 200stack にデプロイする手順。WXR 分析、mapping config、画像・コンテンツ移行、microCMS スキーマ生成・冪等入稿、ピクセル比較ゲート、機能照合、200stack 公開までを、同梱の決定的 CLI(wpkit)と品質ゲートで進める。トリガー例:「WordPressを移行して」「WXRからmicroCMSへ」「wpkitで移行」「WordPressを200stackに」「静的サイト化して」「WordPressサイトをNext.jsにリニューアル」。
+description: WordPress サイトを microCMS + formrun + Next.js 静的エクスポートへ移行し、固定ページ・記事テンプレをネイティブ実装(CSS Modules)して 200stack にデプロイする手順。WXR・画像・コンテンツ移行、microCMS schema/import、6系統fidelity、保存archive対builtの文言・alt/aria・common chrome・route intent監査、artifact-bound strict parity、scorecard、公開までを決定的 CLI(wpkit)で進める。トリガー例:「WordPressを移行して」「WXRからmicroCMSへ」「wpkitで移行」「WordPressを200stackに」「静的サイト化して」「移行差分を監査して」「現行文言・属性を維持して」「WordPressサイトをNext.jsにリニューアル」。
 ---
 
 # WordPress → microCMS + Next.js 静的サイト → 200stack 移行
@@ -19,7 +19,7 @@ cd <案件>/wp-static-kit && npm install && npx playwright install chromium
 - 案件ルートにコミット対象の `migration-state.json` を `npm run wpkit -- status init --dir ..` で作成し、以後は `wpkit status` で通過済み gate と次工程を確認する
 - 台帳がある案件では後段コマンドの前提を強制する。緊急時だけ `--force` で上書き実行でき、その記録は台帳へ残る(台帳がない既存案件の挙動は変わらない)
 - `status` / `status approve` / 後段コマンドは `wp-static-kit` から案件ルートの台帳を上方探索するため、追加の `--dir` 指定は不要
-- 初めて担当するオペレーターは、実案件へ入る前に `kit/e2e/walkthrough.md` の golden ケースを一巡して CLI と12ゲートを確認する
+- 初めて担当するオペレーターは、実案件へ入る前に `kit/e2e/walkthrough.md` の golden ケースを一巡して CLI と全required gateを確認する
 
 ## 全体フロー(ゲート順)
 
@@ -399,9 +399,9 @@ export function SiteLink({ href, ...props }: ComponentPropsWithoutRef<"a">) {
 |---|---|---|---|
 | (a) 寸法ブロック | 代表面の DOM y/h(ゼロ基準) | `measure-blocks.mjs` | セクション高・累積 dy |
 | (b) ピクセル | 全ページ×2vp×中間幅のスクショ差分 | `fidelity-scan.mjs`(基準=§0収集 or `render-archive-baselines.mjs`) | アイキャッチのクロップ方式、白帯幅、カラム実効幅 |
-| (c) 可視テキスト | 実行後DOMの全文(結合+行分割) | `_textdiff.mjs` | 文言ドリフト、`<br>`位置、記号(○/◯)、ページャ順 |
+| (c) 静的DOMテキスト | full document + tracked surface の全文(CSS/JS後のcomputed visibilityではない) | `archive-built-audit.mjs` | 文言ドリフト、whitespace、`<br>`位置、記号(○/◯)、ページャ順 |
 | (d) トークン | 書体クラス対応要素の computed font/color | analyze のトークン表と CDP 照合 | font-b 見出しが別書体、色の取り違え |
-| (e) 静的属性 | メタ・リンク・画像属性・非表示要素・head資産 | `audit-archive-vs-built.mjs` | 非表示SEO用h1の欠落、favicon欠落、alt差 |
+| (e) 静的属性 | メタ・リンク・画像/ARIA属性・非表示要素・head資産 | `archive-built-audit.mjs` | common chrome、surface外画像、favicon、alt/全aria/title差 |
 | (f) 動き | アニメ/ホバー規則数+CDP実挙動 | analyze のインベントリと突き合わせ | transition 125→27、ホバー未移植、死にルールの誤移植 |
 
 **ハーネスの決定化はデフォルトで全系統に適用する**(非決定な計測は偽差分でゲートを無力化する):
@@ -410,10 +410,21 @@ export function SiteLink({ href, ...props }: ComponentPropsWithoutRef<"a">) {
 (`MEASURE_EXTRA_CSS`)、凍結レンダで再現できない Webフォントの両側中和、CMS画像URLの
 fetch-once キャッシュ事前充填(built 側だけ画像404になる偽差分の防止)。
 
-**エビデンスは2層で保存する**: 作業バッファは `_scratch/`(gitignore)、**合否判定に使った
-結果JSONは `docs/evidence/<gate>/` へ確定コミット**する。scorecard は evidence 側を読む。
-これで「ゲートを通した証拠」がリポジトリに残り、振り返り・引き継ぎ・スキル回帰テストが
-ローカル環境に依存しない。
+**エビデンスは2層で保存する**: current artifactへ束縛した機械結果JSONは`_scratch/`(gitignore)へ置き、
+scorecardはrequired commandのstdout/current artifactと、artifact bindingを持つmeasurement source、live review、a11y/Lighthouse attestationをその場で検証する。
+Gitへ確定するのは判断を説明するMarkdown、exact observation decision、fidelity approval、live review等の人の記録であり、
+staleになり得る生成reportを`docs/evidence/`から読み戻してcurrent判定の代用にしない。
+
+系統(c)(e)は同じ deterministic collector を標準入口にする。archive inventory、route intent ledger、
+built output の和集合を検査し、archive非200からbuilt outputが生えたrouteも観測する。本文selectorだけでなく
+body全体を必ず比較し、header/footer/common chrome、featured/relatedなどsurface外画像を落とさない。
+画像はbasenameや単純multisetでなくmedia map/manifest、リンク、DOM context、occurrenceを結んだidentityで裁定する。
+意図差分は observation SHA-256、route、code、severity が完全一致する decision ledger だけで抑制する。
+invalid/unused/duplicate/mismatch decisionはBlocking、Blocking observationは抑制不可である。
+
+既存UIはstrict parityを既定とし、`alt`、全`aria-*`、`title`、`placeholder`、`value`、`role`、`hidden`を
+原文どおり保持する。既存UIのアクセシビリティ改善も自動補正せずhash decisionを必要とする。新しく追加するUIだけは
+accessible name、form label、iframe title、ARIA参照、画像altの現行基準を別laneで適用する。
 
 以下、系統(a)(b)の詳細。用途の異なる2本を混同しない。
 
@@ -434,7 +445,7 @@ fetch-once キャッシュ事前充填(built 側だけ画像404になる偽差�
   - フォーム全経路: 空送信→エラー表示、正常入力→確認/送信到達(**実送信はしない**)、SDK 初期化(option・validation DOM の実在)、プリフィルを確認する
   - 遷移: push 遷移の行列で scrollY=0、ブラウザ戻るで復元、遷移後の body / スタイル状態を確認する
   - ホバー・ライトボックス: ホバー演出、モーダル開閉とフォーカスを確認する
-  - 運用: レビュー後の指摘はテンプレ同梱の `live-scenarios.mjs` (`scenarios.config.json`) へ機械化して再発を防ぐ。`--record` は `docs/live-review.json` の `scenarios` へ転記し、`findings` はこれまでどおり人が記録する
+  - 運用: レビュー後の指摘はテンプレ同梱の `live-scenarios.mjs` (`scenarios.config.json`) へ機械化して再発を防ぐ。`--record` は `docs/live-review.json` の `scenarios` と検証済みfull artifact bindingへ転記し、`findings` はこれまでどおり人が記録する
 
 #### pixel-gate: 変更前後の自ビルド比較
 
@@ -551,7 +562,8 @@ npm run wpkit -- scorecard --config ../scorecard.config.json
 - 比較は**JS 実行後**の DOM で行う。archive は取得時点で JS 実行済みの HTML なので、新実装側も
   `networkidle` まで待つ。`domcontentloaded` で比べるとハイドレーション後に出る違反を取り逃す
 
-テンプレ側のデフォルト(実案件で踏んだ順):
+テンプレ側のデフォルト(実案件で踏んだ順)。以下は**新規UI**へ適用する。archive由来の既存UIは
+属性もstrict parityとし、変更する場合はarchive-built observationのhash decisionを先に残す:
 
 - **自前カルーセルの非アクティブスライドは `aria-hidden` だけでは不十分**。中のリンクにキーボード
   フォーカスが入る。`inert`(React 19 は boolean 属性として対応)を併用する。**これが移行で増やした

@@ -23,6 +23,7 @@
   "devDependencies": {
     "@types/node": "^26.1.1",
     "@types/pngjs": "^6.0.5",
+    "linkedom": "^0.18.13",
     "tsx": "^4.23.0",
     "typescript": "^7.0.2",
     "vitest": "^4.1.10"

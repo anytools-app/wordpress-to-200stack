@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { mkdtemp, mkdir, readFile, rm, unlink, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -5,6 +6,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { approveStatusGate, enforceGate, getStatus, initStatus, loadMigrationState, saveMigrationState, type MigrationState } from "../src/status/index.js";
+import { inspectBuildOutput, inspectSourceRevision } from "../src/scorecard/index.js";
 
 const temporary: string[] = [];
 async function tempDir(): Promise<string> { const path = await mkdtemp(join(tmpdir(), "wpkit-status-")); temporary.push(path); return path; }
@@ -45,6 +47,52 @@ describe("wpkit status", () => {
     state.gates.archive!.at = "2000-01-01T00:00:00.000Z"; await saveMigrationState(root, state);
     await utimes(join(root, "_scratch/archive/inventory.json"), new Date("2026-01-01T00:00:00.000Z"), new Date("2026-01-01T00:00:00.000Z"));
     status = await getStatus({ cwd: root }); expect(status?.gates.find((gate) => gate.id === "archive")?.stale).toBe(true);
+  });
+
+  it("does not treat implement as complete after the bound build output mutates", async () => {
+    const root = await tempDir(); const site = join(root, "site"); const out = join(site, "out");
+    await mkdir(out, { recursive: true }); await writeFile(join(out, "index.html"), "before");
+    execFileSync("git", ["init", "--quiet"], { cwd: site });
+    await writeFile(join(site, ".gitignore"), "out/\n_scratch/\n"); await writeFile(join(site, "source.txt"), "fixture");
+    execFileSync("git", ["add", ".gitignore", "source.txt"], { cwd: site });
+    execFileSync("git", ["-c", "user.name=wpkit-test", "-c", "user.email=wpkit@example.invalid", "commit", "--quiet", "-m", "fixture"], { cwd: site });
+    await json(join(root, "scorecard.config.json"), { site: "site", outDir: "out", artifact: "_scratch/build-artifact.json", gates: [] });
+    const inspected = (await inspectBuildOutput(out))!;
+    await json(join(site, "_scratch/build-artifact.json"), { schemaVersion: 1, generatedAt: "2026-08-11T00:00:00.000Z", buildHash: inspected.hash, fileCount: inspected.fileCount, bytes: inspected.bytes, source: inspectSourceRevision(site) });
+    await initStatus({ cwd: root });
+    expect((await getStatus({ cwd: root }))?.gates.find((gate) => gate.id === "implement")?.status).toBe("done");
+    await writeFile(join(out, "index.html"), "after");
+    const stale = (await getStatus({ cwd: root }))?.gates.find((gate) => gate.id === "implement");
+    expect(stale?.status).toBe("pending");
+    expect(stale?.warnings.join(" ")).toContain("build artifact");
+  });
+
+  it("keeps legacy implement completion based on the configured out directory when artifact is not configured", async () => {
+    const root = await tempDir(); const out = join(root, "site", "out");
+    await mkdir(out, { recursive: true }); await writeFile(join(out, "index.html"), "legacy built output");
+    await json(join(root, "scorecard.config.json"), { site: "site", outDir: "out", gates: [] });
+    await initStatus({ cwd: root });
+    const implement = (await getStatus({ cwd: root }))?.gates.find((gate) => gate.id === "implement");
+    expect(implement?.status).toBe("done");
+    expect(implement?.metrics?.artifactMatches).toBeUndefined();
+  });
+
+  it("does not treat implement as complete after source changes on an already-dirty worktree", async () => {
+    const root = await tempDir(); const site = join(root, "site"); const out = join(site, "out");
+    await mkdir(site, { recursive: true }); execFileSync("git", ["init", "--quiet"], { cwd: site });
+    await writeFile(join(site, ".gitignore"), "out/\n_scratch/\n"); await writeFile(join(site, "source.txt"), "committed");
+    execFileSync("git", ["add", ".gitignore", "source.txt"], { cwd: site });
+    execFileSync("git", ["-c", "user.name=wpkit-test", "-c", "user.email=wpkit@example.invalid", "commit", "--quiet", "-m", "fixture"], { cwd: site });
+    await mkdir(out); await writeFile(join(out, "index.html"), "built"); await writeFile(join(site, "source.txt"), "dirty-before-build");
+    await json(join(root, "scorecard.config.json"), { site: "site", outDir: "out", artifact: "_scratch/build-artifact.json", gates: [] });
+    const inspected = (await inspectBuildOutput(out))!;
+    await json(join(site, "_scratch/build-artifact.json"), { schemaVersion: 1, generatedAt: "2026-08-11T00:00:00.000Z", buildHash: inspected.hash, fileCount: inspected.fileCount, bytes: inspected.bytes, source: inspectSourceRevision(site) });
+    await initStatus({ cwd: root });
+    expect((await getStatus({ cwd: root }))?.gates.find((gate) => gate.id === "implement")?.status).toBe("done");
+    await writeFile(join(site, "source.txt"), "dirty-after-build");
+    const stale = (await getStatus({ cwd: root }))?.gates.find((gate) => gate.id === "implement");
+    expect(stale?.status).toBe("pending");
+    expect(stale?.warnings.join(" ")).toContain("build artifact");
   });
 
   it("records approvals, rejects non-approval gates, and warns when flow order is skipped", async () => {

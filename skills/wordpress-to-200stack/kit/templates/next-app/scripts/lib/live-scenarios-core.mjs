@@ -193,7 +193,7 @@ export async function hashBuildOutput(outDir) {
   return hash.digest("hex");
 }
 
-export function mergeLiveReview(existing, scenarioResults, buildHash, today) {
+export function mergeLiveReview(existing, scenarioResults, build, today) {
   const current = record(existing);
   const base = current ? { ...current } : { date: today, reviewer: "", findings: [] };
   const oldScenarios = Array.isArray(base.scenarios) ? base.scenarios : [];
@@ -202,7 +202,10 @@ export function mergeLiveReview(existing, scenarioResults, buildHash, today) {
   base.scenarios = oldScenarios.map((item) => record(item) && typeof item.name === "string" && byName.has(item.name) ? byName.get(item.name) : item);
   const existingNames = new Set(oldScenarios.map((item) => record(item)?.name).filter((name) => typeof name === "string"));
   for (const replacement of replacements) if (!existingNames.has(replacement.name)) base.scenarios.push(replacement);
-  base.build = buildHash;
+  const binding = build && typeof build === "object" && !Array.isArray(build) ? build : null;
+  base.build = binding?.buildHash ?? build;
+  if (binding) base.binding = binding;
+  else delete base.binding;
   return base;
 }
 

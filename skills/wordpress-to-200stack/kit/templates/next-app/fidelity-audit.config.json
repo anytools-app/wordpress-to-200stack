@@ -1,1 +1,24 @@
-{}
+{
+  "schemaVersion": 1,
+  "repository": ".",
+  "archiveDirectory": "../_scratch/archive",
+  "inventory": "../_scratch/archive/inventory.json",
+  "outDirectory": "out",
+  "artifact": "_scratch/build-artifact.json",
+  "routeLedger": "src/data/legacy-routes.json",
+  "mediaMap": "../_scratch/media-map.json",
+  "mediaManifest": "src/data/media-manifest.json",
+  "decisions": "fidelity-decisions.config.json",
+  "report": "_scratch/fidelity/archive-built-audit.json",
+  "origin": "https://example.invalid",
+  "internalHosts": [],
+  "excludeSelectors": [],
+  "surfaceRules": [
+    {
+      "id": "primary-content",
+      "route": "^/",
+      "archive": "main",
+      "built": "main"
+    }
+  ]
+}

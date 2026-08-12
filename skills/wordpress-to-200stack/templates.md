@@ -73,7 +73,7 @@ site/ の Next.js(静的エクスポート)に <route パターン> の表示テ
 - CSS所有権の意思決定木に従う: 単一サーフェス固有→そのCSS Module、共有クラスタ→`src/styles/`の共有Module、
   要素リセット・基本フォント→globals-reset、横断utility→専用ファイル。1ルール=1所有ファイル
 - 内部リンクは`SiteLink`を使い、hrefはルート台帳の**新パス**にする(旧URLは301の入口であって行き先ではない)。素の`<a>`は外部・別タブだけ
-- 自前カルーセルの非アクティブスライドは`aria-hidden`+`inert`。アイコンのみのリンクに`aria-label`
+- 新規UIのカルーセルは`aria-hidden`+`inert`、アイコンのみのリンクは`aria-label`を使う。archive由来の既存UIはalt/全aria/title/placeholder/value/role/hiddenを原文保持し、変更はobservation hash decisionを必須にする
 - 旧テーマCSS・原文CSS・ページ単位stylesheet読込を持ち込まない
 - jQueryプラグイン(imgLiquid / slick / lity)の見た目はCSS + Reactで代替する(scroll-snap等)
 - フォームはformrunのaction・input nameを原文と完全一致させる。SDK埋め込み型は同一form IDのembed div
@@ -84,6 +84,7 @@ site/ の Next.js(静的エクスポート)に <route パターン> の表示テ
 - <代表 URL 2〜3件> についてdesktop/mobileの原文比較を行い、ピクセル差分を収束させること
 - measure-blocks の必須ブロックで dy=0 / dh=0 を確認すること(desktop / mobile 両 viewport。例外は fidelity-approvals 台帳に登録した意図的差分のみ)
 - フォームaction/name、内部/外部リンク、title/canonical/OGP/robotsを原文・台帳と照合すること
+- `npm run verify:archive-built` でfull document + tracked surface、common chrome、surface外画像、静的DOMテキスト、静的属性、JSON-LD値の未裁定observationが0であること
 - DOMタグ実体数カウントは構造差の診断に使ってよいが、完了条件にしない(substringはRSCペイロードで2倍に見える)
 - CSS・レイアウト変更は`css-visual-diff.mjs`のbefore/after capture→compareで退行0を確認すること
 - axe-coreで本番アーカイブと比較し、**違反を増やしていない**こと(本番由来の違反は別issue)

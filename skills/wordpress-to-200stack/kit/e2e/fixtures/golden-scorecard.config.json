@@ -1,7 +1,29 @@
 {
   "site": "site",
   "outDir": "out",
+  "artifact": "_scratch/build-artifact.json",
   "gates": [
+    {
+      "id": "artifact-binding",
+      "kind": "command",
+      "label": "build artifact",
+      "run": ["npm", "run", "artifact:verify"],
+      "bindArtifact": true,
+      "assert": [
+        { "path": "result", "equals": "PASS" }
+      ]
+    },
+    {
+      "id": "archive-built",
+      "kind": "command",
+      "label": "archive-built 忠実性",
+      "run": ["npm", "run", "verify:archive-built"],
+      "bindArtifact": true,
+      "assert": [
+        { "path": "result", "equals": "PASS" },
+        { "path": "summary.unresolved", "equals": 0 }
+      ]
+    },
     {
       "id": "routes",
       "kind": "command",
@@ -31,6 +53,7 @@
       "kind": "file",
       "label": "fidelity 承認網羅",
       "check": "fidelity-approvals",
+      "bindArtifact": true,
       "approvals": "docs/fidelity-approvals.json",
       "surfaces": "_scratch/fidelity/surfaces-summary.json"
     },
@@ -38,6 +61,7 @@
       "id": "static-export-attestation",
       "kind": "attestation",
       "label": "静的 export 確認",
+      "bindArtifact": true,
       "file": "docs/quality-attestations.json",
       "key": "static-export"
     }

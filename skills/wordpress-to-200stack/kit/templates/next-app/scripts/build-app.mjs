@@ -2,6 +2,8 @@ import { spawnSync } from "node:child_process";
 import { rmSync } from "node:fs";
 import { join, resolve } from "node:path";
 
+import { createBuildArtifact } from "./lib/build-artifact.mjs";
+
 const project = resolve(import.meta.dirname, "..");
 const nextBin = join(project, "node_modules", "next", "dist", "bin", "next");
 const memoryLimitMb = Number(process.env.BUILD_MEMORY_LIMIT_MB) || 0;
@@ -27,4 +29,14 @@ const result = spawnSync(process.execPath, [nextBin, ...args], {
   stdio: "inherit",
   env,
 });
-process.exit(result.status ?? 1);
+if (result.status !== 0) process.exit(result.status ?? 1);
+
+const artifactPath = resolve(
+  process.env.WPKIT_BUILD_ARTIFACT ?? join(project, "_scratch", "build-artifact.json"),
+);
+const artifact = await createBuildArtifact({
+  outDirectory: resolve(process.env.WPKIT_OUT_DIR ?? join(project, "out")),
+  repository: project,
+  artifactPath,
+});
+console.log(`build-app: artifact ${artifact.buildHash} (${artifact.fileCount} files, ${artifact.bytes} bytes)`);

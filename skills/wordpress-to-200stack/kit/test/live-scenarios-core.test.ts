@@ -34,6 +34,8 @@ describe("live-scenarios core", () => {
       { name: "new", type: "carousel", url: "/gallery/", result: "ng: failed", recordedAt: "2026-07-31" },
     ]);
     expect(core.mergeLiveReview(undefined, [{ name: "first", type: "hover", url: "/", result: "ok" }], "hash", "2026-07-31")).toMatchObject({ date: "2026-07-31", reviewer: "", findings: [], build: "hash" });
+    const binding = { buildHash: "a".repeat(64), fileCount: 2, bytes: 42, source: { commit: "abc", dirty: false, worktreeHash: "b".repeat(64) } };
+    expect(core.mergeLiveReview(undefined, [{ name: "first", type: "hover", url: "/", result: "ok" }], binding, "2026-07-31")).toMatchObject({ build: binding.buildHash, binding });
   });
 
   it("evaluates all supported expectation forms", () => {

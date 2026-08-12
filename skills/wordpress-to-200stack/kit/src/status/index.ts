@@ -1,7 +1,7 @@
 import { access, mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { dirname, join, relative, resolve, sep } from "node:path";
 
-import { hashBuildOutput } from "../scorecard/index.js";
+import { hashBuildOutput, inspectBuildOutput, inspectSourceRevision, isValidSourceRevision, sourceRevisionMatches } from "../scorecard/index.js";
 
 export const GATE_IDS = ["archive", "analyze", "mapping", "scf-fields", "parse", "media", "schema-import", "implement", "fidelity", "theme-crosscheck", "verify", "publish"] as const;
 export type GateId = typeof GATE_IDS[number];
@@ -20,7 +20,7 @@ export type StatusGate = {
   record?: GateRecord;
   warnings: string[];
   stale: boolean;
-  metrics?: { errors?: number; warnings?: number; overall?: string };
+  metrics?: { errors?: number; warnings?: number; overall?: string; buildHash?: string; artifactMatches?: boolean };
   command: string;
 };
 export type StatusResult = { root: string; state: MigrationState; gates: StatusGate[]; warnings: string[]; next?: { gate: GateId; command: string; kind: GateKind } };
@@ -86,12 +86,39 @@ export async function saveMigrationState(cwd: string, state: MigrationState): Pr
   await writeFile(stateFile(root), `${JSON.stringify(state, null, 2)}\n`);
 }
 
-async function scorecardOutput(root: string): Promise<{ outDir: string; configPresent: boolean }> {
+async function scorecardOutput(root: string): Promise<{ siteDir: string; outDir: string; artifactPath: string; artifactConfigured: boolean; configPresent: boolean }> {
   const configPath = join(root, "scorecard.config.json");
-  if (!await exists(configPath)) return { outDir: join(root, "site", "out"), configPresent: false };
+  if (!await exists(configPath)) {
+    const siteDir = join(root, "site");
+    return { siteDir, outDir: join(siteDir, "out"), artifactPath: join(siteDir, "_scratch", "build-artifact.json"), artifactConfigured: false, configPresent: false };
+  }
   const value = JSON.parse(await readFile(configPath, "utf8")) as unknown;
   if (!isRecord(value) || typeof value.site !== "string" || typeof value.outDir !== "string") throw new Error("scorecard.config.json が不正です: site, outDir が必要です");
-  return { outDir: resolve(root, value.site, value.outDir), configPresent: true };
+  const siteDir = resolve(root, value.site);
+  return { siteDir, outDir: resolve(siteDir, value.outDir), artifactPath: resolve(siteDir, typeof value.artifact === "string" ? value.artifact : "_scratch/build-artifact.json"), artifactConfigured: typeof value.artifact === "string", configPresent: true };
+}
+
+function sourceMatchesCurrent(artifact: Record<string, unknown>, siteDir: string): boolean {
+  return isValidSourceRevision(artifact.source) && sourceRevisionMatches(artifact.source, inspectSourceRevision(siteDir));
+}
+
+function sourceBindingsMatch(left: Record<string, unknown>, right: Record<string, unknown>): boolean {
+  const leftSource = isRecord(left.source) ? left.source : undefined;
+  const rightSource = isRecord(right.source) ? right.source : undefined;
+  if (!isValidSourceRevision(leftSource) || !isValidSourceRevision(rightSource)) return false;
+  return sourceRevisionMatches(leftSource, rightSource);
+}
+function validArtifact(value: unknown): value is Record<string, unknown> {
+  const artifact = isRecord(value) ? value : undefined;
+  return Boolean(
+    artifact?.schemaVersion === 1 &&
+    /^[a-f\d]{64}$/i.test(String(artifact.buildHash ?? "")) &&
+    Number.isInteger(artifact.fileCount) &&
+    (artifact.fileCount as number) > 0 &&
+    Number.isInteger(artifact.bytes) &&
+    (artifact.bytes as number) > 0 &&
+    isValidSourceRevision(artifact.source),
+  );
 }
 async function defaultEvidence(root: string, definition: GateDefinition): Promise<string | undefined> {
   if (definition.id !== "implement") return definition.evidence;
@@ -105,6 +132,24 @@ async function machineEvidence(root: string, id: GateId, evidence: string | unde
   if (!evidence) return { done: false, evidenceExists: false };
   const path = resolve(root, evidence); const evidenceMtime = await mtime(path);
   if (!evidenceMtime) return { done: false, evidenceExists: false };
+  if (id === "implement") {
+    const output = await scorecardOutput(root);
+    if (!output.artifactConfigured) {
+      const current = await inspectBuildOutput(output.outDir);
+      return { done: true, evidenceExists: true, evidenceMtime, metrics: { buildHash: current?.hash } };
+    }
+    try {
+      const [artifactValue, current] = await Promise.all([
+        readFile(output.artifactPath, "utf8").then((source) => JSON.parse(source) as unknown),
+        inspectBuildOutput(output.outDir),
+      ]);
+      const artifact = validArtifact(artifactValue) ? artifactValue : undefined;
+      const artifactMatches = Boolean(current && current.fileCount > 0 && current.bytes > 0 && artifact && artifact.buildHash === current.hash && artifact.fileCount === current.fileCount && artifact.bytes === current.bytes && sourceMatchesCurrent(artifact, output.siteDir));
+      return { done: artifactMatches, evidenceExists: true, evidenceMtime, metrics: { buildHash: current?.hash, artifactMatches } };
+    } catch {
+      return { done: false, evidenceExists: true, evidenceMtime, metrics: { artifactMatches: false } };
+    }
+  }
   if (id === "parse") {
     try {
       const value = JSON.parse(await readFile(path, "utf8")) as unknown;
@@ -118,7 +163,33 @@ async function machineEvidence(root: string, id: GateId, evidence: string | unde
     try {
       const value = JSON.parse(await readFile(path, "utf8")) as unknown;
       const overall = isRecord(value) && typeof value.overall === "string" ? value.overall : undefined;
-      return { done: overall === "PASS", evidenceExists: true, evidenceMtime, metrics: { overall } };
+      const output = await scorecardOutput(root);
+      const current = await inspectBuildOutput(output.outDir);
+      const reportArtifact = isRecord(value) && isRecord(value.buildArtifact) ? value.buildArtifact : undefined;
+      let recordedArtifact: Record<string, unknown> | undefined;
+      try {
+        const candidate = JSON.parse(await readFile(output.artifactPath, "utf8")) as unknown;
+        recordedArtifact = validArtifact(candidate) ? candidate : undefined;
+      } catch { /* Missing artifact is a stale prerequisite, not a parse crash. */ }
+      const artifactMatches = output.artifactConfigured
+        ? Boolean(
+          current &&
+          current.fileCount > 0 &&
+          current.bytes > 0 &&
+          reportArtifact &&
+          validArtifact({ schemaVersion: 1, ...reportArtifact }) &&
+          recordedArtifact &&
+          reportArtifact.buildHash === current.hash &&
+          reportArtifact.fileCount === current.fileCount &&
+          reportArtifact.bytes === current.bytes &&
+          recordedArtifact.buildHash === current.hash &&
+          recordedArtifact.fileCount === current.fileCount &&
+          recordedArtifact.bytes === current.bytes &&
+          sourceBindingsMatch(reportArtifact, recordedArtifact) &&
+          sourceMatchesCurrent(recordedArtifact, output.siteDir)
+        )
+        : Boolean(current && isRecord(value) && value.buildHash === current.hash);
+      return { done: overall === "PASS" && artifactMatches, evidenceExists: true, evidenceMtime, metrics: { overall, buildHash: current?.hash, artifactMatches } };
     } catch { return { done: false, evidenceExists: true, evidenceMtime }; }
   }
   return { done: true, evidenceExists: true, evidenceMtime };
@@ -143,6 +214,7 @@ export async function getStatus(options: { cwd?: string } = {}): Promise<StatusR
       // analyze always writes scf-definitions.json, including an empty definition list.
       const result = await machineEvidence(root, definition.id, evidence);
       status = result.done ? "done" : "pending"; metrics = result.metrics;
+      if ((definition.id === "implement" || definition.id === "verify") && result.evidenceExists && result.metrics?.artifactMatches === false) warnings.push(`${definition.id}: build artifact が現在の出力と一致しません`);
       if ((record?.status === "done" || record?.status === "approved") && !result.evidenceExists) warnings.push(`${definition.id}: 記録済みですが evidence がありません`);
       stale = result.done && staleAfter(record, result.evidenceMtime);
       if (stale) warnings.push(`${definition.id}: 成果物が記録より新しいため再確認してください`);
@@ -153,7 +225,7 @@ export async function getStatus(options: { cwd?: string } = {}): Promise<StatusR
             const scorecard = JSON.parse(await readFile(resolve(root, evidence!), "utf8")) as unknown;
             const recordedHash = isRecord(scorecard) && typeof scorecard.buildHash === "string" ? scorecard.buildHash : null;
             const currentHash = await hashBuildOutput(output.outDir);
-            if (recordedHash !== currentHash) { stale = true; warnings.push("verify: scorecard の buildHash が現在のビルド出力と一致しません"); }
+            if (recordedHash !== currentHash) { stale = true; status = "pending"; warnings.push("verify: scorecard の buildHash が現在のビルド出力と一致しません"); }
           } catch { /* evidence result already determines completion */ }
         }
       }
@@ -162,7 +234,7 @@ export async function getStatus(options: { cwd?: string } = {}): Promise<StatusR
       if (status === "approved" && evidence && !await exists(resolve(root, evidence))) warnings.push(`${definition.id}: 承認済みですが evidence がありません`);
       const evidenceMtime = evidence ? await mtime(resolve(root, evidence)) : undefined;
       stale = status === "approved" && staleAfter(record, evidenceMtime);
-      if (stale) warnings.push(`${definition.id}: 成果物が記録より新しいため再確認してください`);
+      if (stale) { status = "pending"; warnings.push(`${definition.id}: 成果物が記録より新しいため再確認してください`); }
     }
     gates.push({ id: definition.id, index, number: definition.number, kind: definition.kind, status, evidence, record, warnings, stale, metrics, command: definition.command });
   }

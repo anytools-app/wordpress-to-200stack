@@ -12,11 +12,12 @@ WXR(WordPress エクスポート XML)の分析から公開までを、ゲート�
 0. archive(現行サイトの凍結)→ 1. analyze → 2. mapping config(製品判断)
 → 3. parse(ゲート1: errors 0)→ 4. media(ゲート2)
 → 5. schema gen → microCMS作成 → import(ゲート3。実装の前提)
-→ 6. next-app展開 → ネイティブ実装ループ(ピクセル比較)
-→ 7. verifyスイート→ scorecard集約(ゲート4)→ 8. 200stack公開
+→ 6. next-app展開 → ネイティブ実装ループ(6系統fidelity)
+→ artifact-bound archive-built strict parity(文言・属性・common chrome・route intent)
+→ 7. verifyスイート→ required gateをscorecard集約(ゲート4)→ 8. 200stack公開
 ```
 
-- **決定的な処理は `wpkit`**(`kit/` 同梱): WXR 解析、画像移行、microCMS スキーマ生成・冪等入稿、新旧照合
+- **決定的な処理は `wpkit`**(`kit/` 同梱): WXR 解析、画像移行、microCMS スキーマ生成・冪等入稿、新旧照合。保存archive対builtの差分はSHA-256 observationとexact decision ledgerで裁定し、build artifactへ束縛
 - **進行台帳は `wpkit status`**: 案件ルートにコミットする `migration-state.json` で gate・承認・次工程を追跡し、台帳がある案件だけ後段の前提を強制
 - **判断はスキル(司令塔)**: 移行スコープ・フィールド型・404/301 の裁定などの製品判断はユーザーに確認
 - **成果物は straight-to-final**: 固定ページは`src/app/<page>/page.tsx`、CMS記事は一覧+`[id]`+`src/templates/`、全てCSS Modules。内部リンクはSiteLink(`next/link`)、フォームはformrun

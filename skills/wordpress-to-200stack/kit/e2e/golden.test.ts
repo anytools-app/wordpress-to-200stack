@@ -1,7 +1,7 @@
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { cp, mkdtemp, mkdir, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { cp, mkdtemp, mkdir, readFile, readdir, rm, stat, symlink, writeFile } from "node:fs/promises";
+import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import sharp from "sharp";
@@ -44,6 +44,17 @@ let microCmsCalls: MicroCmsCall[] = [];
 async function cacheImage(cacheDir: string, url: string, body: Buffer): Promise<void> {
   const key = cacheKey(url);
   await Promise.all([writeFile(join(cacheDir, `${key}.bin`), body), writeFile(join(cacheDir, `${key}.json`), JSON.stringify({ url, status: 200, contentType: "image/jpeg" }))]);
+}
+async function outputIndexRoutes(root: string, directory = root, routes: string[] = []): Promise<string[]> {
+  for (const entry of await readdir(directory, { withFileTypes: true })) {
+    const path = join(directory, entry.name);
+    if (entry.isDirectory()) await outputIndexRoutes(root, path, routes);
+    else if (entry.name === "index.html") {
+      const parent = relative(root, dirname(path)).split("/").filter(Boolean);
+      routes.push(parent.length ? `/${parent.join("/")}/` : "/");
+    }
+  }
+  return routes.sort();
 }
 
 afterAll(async () => { await rm(workDir, { recursive: true, force: true }); });
@@ -192,6 +203,21 @@ async function about() { return (await ContentRepository.load()).findByContentId
 export async function generateMetadata(): Promise<Metadata> { const document = await about(); return document ? { title: document.seo?.title || document.content.title, alternates: { canonical: "/about/" } } : {}; }
 export default async function About() { const document = await about(); if (!document) return notFound(); const Template = templateFor(document.api, document.kind); return <Template document={document} />; }
 `);
+    const copiedFidelityConfig = JSON.parse(await readFile(join(siteDir, "fidelity-audit.config.json"), "utf8")) as Record<string, unknown>;
+    expect(copiedFidelityConfig).toMatchObject({ archiveDirectory: "../_scratch/archive", inventory: "../_scratch/archive/inventory.json", mediaMap: "../_scratch/media-map.json" });
+    const fidelityAuditConfig = {
+      ...copiedFidelityConfig,
+      origin: "https://example.test",
+      internalHosts: ["example.test"],
+      surfaceRules: [{ id: "golden-document", route: "^/", archive: "body", built: "body" }],
+    };
+    await writeFile(join(siteDir, "fidelity-audit.config.json"), JSON.stringify(fidelityAuditConfig, null, 2));
+    for (const args of [["init", "--quiet"], ["add", "."]]) {
+      const git = spawnSync("git", args, { cwd: siteDir, encoding: "utf8" });
+      expect(git.status, `${git.stdout ?? ""}\n${git.stderr ?? ""}`).toBe(0);
+    }
+    const commit = spawnSync("git", ["-c", "user.name=wpkit-e2e", "-c", "user.email=wpkit@example.invalid", "commit", "--quiet", "-m", "golden site fixture"], { cwd: siteDir, encoding: "utf8" });
+    expect(commit.status, `${commit.stdout ?? ""}\n${commit.stderr ?? ""}`).toBe(0);
 
     const contentsPath = join(fixtures, "microcms-contents.json");
     const build = spawnSync(process.execPath, ["scripts/build-app.mjs"], {
@@ -212,6 +238,20 @@ export default async function About() { const document = await about(); if (!doc
     expect(build.status, buildLog).toBe(0);
     await expect(stat(join(siteDir, "out", "index.html"))).resolves.toBeDefined();
     expect(buildLog).toMatch(/\[wpkit-e2e\] intercept hit pid=\d+ ipc=true api=/);
+    const buildArtifact = JSON.parse(await readFile(join(siteDir, "_scratch", "build-artifact.json"), "utf8")) as { buildHash: string; fileCount: number; bytes: number; source: unknown };
+    const buildBinding = { buildHash: buildArtifact.buildHash, fileCount: buildArtifact.fileCount, bytes: buildArtifact.bytes, source: buildArtifact.source };
+
+    const parityArchive = join(workDir, "_scratch", "archive");
+    const parityRoutes = await outputIndexRoutes(join(siteDir, "out"));
+    for (const route of parityRoutes) {
+      const builtPath = route === "/" ? join(siteDir, "out", "index.html") : join(siteDir, "out", ...route.slice(1, -1).split("/"), "index.html");
+      const archivePage = join(parityArchive, "pages", encodeURIComponent(route), "page.html");
+      await mkdir(dirname(archivePage), { recursive: true });
+      await writeFile(archivePage, await readFile(builtPath));
+    }
+    await writeFile(join(parityArchive, "inventory.json"), JSON.stringify({ urls: parityRoutes.map((route) => ({ url: `https://example.test${route}`, status: 200 })) }, null, 2));
+    await mkdir(join(siteDir, "_scratch", "fidelity"), { recursive: true });
+    await writeFile(join(workDir, "_scratch", "media-map.json"), "{}\n");
 
     const verification = await verifySite({ oldDir: join(fixtures, "archive"), newTarget: join(siteDir, "out"), reportDir: join(workDir, "_scratch", "verify-site") });
     expect(verification.missing).toEqual([]);
@@ -224,12 +264,39 @@ export default async function About() { const document = await about(); if (!doc
       mkdir(join(workDir, "_scratch", "fidelity"), { recursive: true }),
     ]);
     await Promise.all([
-      writeFile(join(workDir, "docs", "fidelity-approvals.json"), JSON.stringify({ approvals: [{ surface: "/", date: "2020-01-05", by: "golden-e2e" }, { surface: "/about/", date: "2020-01-05", by: "golden-e2e" }, { surface: "/cars/raw-autop/", date: "2020-01-05", by: "golden-e2e" }] }, null, 2)),
+      writeFile(join(workDir, "docs", "fidelity-approvals.json"), JSON.stringify({ approvals: [{ surface: "/", date: "2020-01-05", by: "golden-e2e", measurements: { source: "site/_scratch/fidelity/archive-built-audit.json" } }, { surface: "/about/", date: "2020-01-05", by: "golden-e2e", measurements: { source: "site/_scratch/fidelity/archive-built-audit.json" } }, { surface: "/cars/raw-autop/", date: "2020-01-05", by: "golden-e2e", measurements: { source: "site/_scratch/fidelity/archive-built-audit.json" } }] }, null, 2)),
       writeFile(join(workDir, "_scratch", "fidelity", "surfaces-summary.json"), JSON.stringify({ surfaces: [{ surface: "/" }, { surface: "/about/" }, { surface: "/cars/raw-autop/" }] }, null, 2)),
-      writeFile(join(workDir, "docs", "quality-attestations.json"), JSON.stringify({ "static-export": { date: "2020-01-05", by: "golden-e2e", values: { network: false } } }, null, 2)),
+      writeFile(join(workDir, "docs", "quality-attestations.json"), JSON.stringify({ "static-export": { date: "2020-01-05", by: "golden-e2e", binding: buildBinding, values: { network: false } } }, null, 2)),
     ]);
-    const scorecard = await runScorecard({ configPath: join(workDir, "scorecard.config.json") });
-    expect(scorecard.overall).toBe("PASS");
+    const scorecardPath = join(workDir, "scorecard.config.json");
+    const scorecard = await runScorecard({ configPath: scorecardPath });
+    expect(scorecard.overall, JSON.stringify(scorecard.gates, null, 2)).toBe("PASS");
+
+    const mutationPath = join(siteDir, "out", "index.html");
+    const originalOutput = await readFile(mutationPath, "utf8");
+    const mutatedOutput = originalOutput
+      .replace(/<body([^>]*)>/i, '<body$1 title="golden-e2e-mutation">')
+      .replace(/<\/main>/i, "golden fidelity mutation</main>");
+    expect(mutatedOutput).not.toBe(originalOutput);
+    await writeFile(mutationPath, mutatedOutput);
+    try {
+      const rebound = spawnSync(process.execPath, ["scripts/build-artifact.mjs", "create"], { cwd: siteDir, encoding: "utf8" });
+      expect(rebound.status, `${rebound.stdout ?? ""}\n${rebound.stderr ?? ""}`).toBe(0);
+      const audit = spawnSync("npm", ["run", "verify:archive-built"], { cwd: siteDir, encoding: "utf8" });
+      expect(audit.status, `${audit.stdout ?? ""}\n${audit.stderr ?? ""}`).toBe(1);
+      const mutationReport = JSON.parse(await readFile(join(siteDir, "_scratch", "fidelity", "archive-built-audit.json"), "utf8")) as { result: string; observations: Array<{ code: string }> };
+      expect(mutationReport.result).toBe("FAIL");
+      expect(mutationReport.observations.map((observation) => observation.code)).toEqual(expect.arrayContaining(["substantive-text-delta", "attribute-element-identity-delta"]));
+      const mutatedScorecard = await runScorecard({ configPath: scorecardPath });
+      expect(mutatedScorecard.overall).toBe("FAIL");
+      expect(mutatedScorecard.gates.find((gate) => gate.id === "archive-built")?.status).toBe("FAIL");
+    } finally {
+      await writeFile(mutationPath, originalOutput);
+      const restoredArtifact = spawnSync(process.execPath, ["scripts/build-artifact.mjs", "create"], { cwd: siteDir, encoding: "utf8" });
+      expect(restoredArtifact.status, `${restoredArtifact.stdout ?? ""}\n${restoredArtifact.stderr ?? ""}`).toBe(0);
+    }
+    const restoredScorecard = await runScorecard({ configPath: scorecardPath });
+    expect(restoredScorecard.overall, JSON.stringify(restoredScorecard.gates, null, 2)).toBe("PASS");
 
     await initStatus({ cwd: workDir, force: true });
     for (const gate of ["mapping", "media", "schema-import", "fidelity", "theme-crosscheck"] as const) await approveStatusGate({ cwd: workDir, gate, by: "golden-e2e" });

@@ -118,7 +118,7 @@ sed -n '/it("8\. builds/,/}, 300_000)/p' e2e/golden.test.ts
 cp -R e2e/fixtures/expected-out/. "$WORK/site/out/"
 ```
 
-E2E が8/8、ログに `[wpkit-e2e] intercept hit`、工程8の `site/out/index.html` existence assertion があることを確認できれば合格です。続く copy は fixture の静的出力を工程7の手動 verify 用に置くだけで、build の代替証拠は E2E の工程8です。工程7で台帳を初期化した後、implement は `done` になります。所要は10分です。実アカウントを設定して build しないことがこのケースの意図です。
+E2E が8/8、ログに `[wpkit-e2e] intercept hit`、工程8の `site/out/index.html` existence assertion があることを確認できれば合格です。続く copy は fixture の静的出力を工程7の手動 verify 用に置くだけで、build の代替証拠は E2E の工程8です。工程7ではこのsite自体を一時Git repoとしてcommitし、copy後の`out/`からartifactを作るため、親repoのignored directoryをsource bindingとして誤用しません。所要は10分です。実アカウントを設定して build しないことがこのケースの意図です。
 
 ## 6.5. fidelity — 見た目の承認
 
@@ -141,17 +141,38 @@ fixture の archive と static output を照合し、E2E と同じ scorecard の
 ```bash
 npm run wpkit -- verify --old "$WORK/_scratch/archive" --new "$WORK/site/out" -o "$WORK/_scratch/verify-site"
 cp -R templates/next-app/scripts "$WORK/site/"
+cp templates/next-app/package.json templates/next-app/package-lock.json templates/next-app/.gitignore "$WORK/site/"
+cp templates/next-app/fidelity-audit.config.json templates/next-app/fidelity-decisions.config.json "$WORK/site/"
 cp templates/next-app/routing-config.jsonc "$WORK/site/"
+ln -s "$(pwd)/templates/next-app/node_modules" "$WORK/site/node_modules"
 cp e2e/fixtures/golden-scorecard.config.json "$WORK/scorecard.config.json"
 WORK="$WORK" node --input-type=module <<'NODE'
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 const work = process.env.WORK;
 await mkdir(join(work, "_scratch/fidelity"), { recursive: true });
 await writeFile(join(work, "site/src/data/legacy-routes.json"), JSON.stringify([{ path: "/" }, { path: "/about/" }, { path: "/cars/raw-autop/" }], null, 2));
-await writeFile(join(work, "docs/fidelity-approvals.json"), JSON.stringify({ approvals: ["/", "/about/", "/cars/raw-autop/"].map((surface) => ({ surface, date: "2020-01-05", by: "golden-e2e" })) }, null, 2));
+await writeFile(join(work, "docs/fidelity-approvals.json"), JSON.stringify({ approvals: ["/", "/about/", "/cars/raw-autop/"].map((surface) => ({ surface, date: "2020-01-05", by: "golden-e2e", measurements: { source: "site/_scratch/fidelity/archive-built-audit.json" } })) }, null, 2));
 await writeFile(join(work, "_scratch/fidelity/surfaces-summary.json"), JSON.stringify({ surfaces: ["/", "/about/", "/cars/raw-autop/"].map((surface) => ({ surface })) }, null, 2));
-await writeFile(join(work, "docs/quality-attestations.json"), JSON.stringify({ "static-export": { date: "2020-01-05", by: "golden-e2e", values: { network: false } } }, null, 2));
+await writeFile(join(work, "_scratch/media-map.json"), "{}\n");
+const routes = ["/", "/about/", "/cars/raw-autop/"];
+for (const route of routes) {
+  const built = route === "/" ? join(work, "site/out/index.html") : join(work, "site/out", ...route.slice(1, -1).split("/"), "index.html");
+  const target = join(work, "_scratch/archive/pages", encodeURIComponent(route), "page.html");
+  await mkdir(join(target, ".."), { recursive: true });
+  await writeFile(target, await readFile(built));
+}
+await writeFile(join(work, "_scratch/archive/inventory.json"), JSON.stringify({ urls: routes.map((route) => ({ url: `https://example.invalid${route}`, status: 200 })) }, null, 2));
+NODE
+(cd "$WORK/site" && git init --quiet && git add . && git -c user.name=wpkit-walkthrough -c user.email=wpkit@example.invalid commit --quiet -m "walkthrough source")
+(cd "$WORK/site" && node scripts/build-artifact.mjs create)
+WORK="$WORK" node --input-type=module <<'NODE'
+import { readFile, writeFile } from "node:fs/promises";
+import { join } from "node:path";
+const work = process.env.WORK;
+const artifact = JSON.parse(await readFile(join(work, "site/_scratch/build-artifact.json"), "utf8"));
+const binding = { buildHash: artifact.buildHash, fileCount: artifact.fileCount, bytes: artifact.bytes, source: artifact.source };
+await writeFile(join(work, "docs/quality-attestations.json"), JSON.stringify({ "static-export": { date: "2020-01-05", by: "golden-e2e", binding, values: { network: false } } }, null, 2));
 NODE
 npm run wpkit -- scorecard --config "$WORK/scorecard.config.json"
 npm run wpkit -- status init --dir "$WORK"
@@ -163,7 +184,7 @@ npm run wpkit -- status approve theme-crosscheck --by walkthrough --dir "$WORK"
 npm run wpkit -- status --dir "$WORK"
 ```
 
-verify の stdout が `checked: 3`、missing / metaMismatches / brokenLinks がすべて0で、`$WORK/_scratch/scorecard/scorecard.json` の overall が `PASS`、status の verify が `done` なら合格です。所要は10分です。実案件では fixture copy を使わず、実 build の `site/out` と案件の scorecard config を使います。
+artifact作成stdoutが`PASS`でvalid commit/dirty/worktreeHashを持ち、archive-built reportとscorecardが同じfull bindingを参照することを確認します。verify の stdout が `checked: 3`、missing / metaMismatches / brokenLinks がすべて0で、`$WORK/_scratch/scorecard/scorecard.json` の overall が `PASS`、status の verify が `done` なら合格です。`out/`を1 byte変え、artifactを再生成した場合でもarchive-built/scorecardは差分でFAILするのが工程8のmutation回帰です。所要は10分です。実案件では fixture copyを使わず、実buildの`site/out`と案件のscorecard configを使います。
 
 ## 8. publish — 200stack 公開
 
