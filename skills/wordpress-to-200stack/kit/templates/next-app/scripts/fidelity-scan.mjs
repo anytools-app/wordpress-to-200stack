@@ -23,15 +23,16 @@ const diffsRoot = join(fidelityDir, "diffs");
 
 function usage(message) {
   if (message) console.error(message);
-  console.error("Usage: node scripts/fidelity-scan.mjs [--limit N] [--only <surfaceId>] [--concurrency 4] [--port 8899] [--keep-diffs 50] [--evidence <json>]");
+  console.error("Usage: node scripts/fidelity-scan.mjs [--limit N] [--only <surfaceId>] [--path </page/>] [--concurrency 4] [--port 8899] [--keep-diffs 50] [--evidence <json>]");
   process.exit(1);
 }
 
 function parseArgs(argv) {
-  const options = { limit: Infinity, only: null, concurrency: 4, port: 8899, keepDiffs: 50, evidence: null };
+  const options = { limit: Infinity, only: null, path: null, concurrency: 4, port: 8899, keepDiffs: 50, evidence: null };
   for (let index = 0; index < argv.length; index += 1) {
     const flag = argv[index];
     if (flag === "--only") options.only = argv[++index] ?? usage("--only requires a surface id");
+    else if (flag === "--path") options.path = normalizePathname(argv[++index] ?? usage("--path requires a pathname"));
     else if (["--limit", "--concurrency", "--port", "--keep-diffs"].includes(flag)) {
       const value = Number(argv[++index]);
       if (!Number.isInteger(value) || value < 0 || (flag === "--concurrency" && value === 0)) usage(`${flag} requires a valid integer`);
@@ -231,7 +232,7 @@ async function main() {
     const path = normalizePathname(new URL(entry.url).pathname);
     return { url: entry.url, path, surface: surfaceForPath(path) };
   });
-  const selected = allRecords.filter((record) => existsSync(outputFile(record.path)) && (!options.only || record.surface === options.only)).slice(0, options.limit);
+  const selected = allRecords.filter((record) => existsSync(outputFile(record.path)) && (!options.only || record.surface === options.only) && (!options.path || record.path === options.path)).slice(0, options.limit);
 
   const server = createCachedServer();
   let browser;

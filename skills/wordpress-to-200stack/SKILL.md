@@ -431,6 +431,20 @@ accessible name、form label、iframe title、ARIA参照、画像altの現行基
 #### fidelity: 原文アーカイブとの比較
 
 - `fidelity-scan.mjs` で凍結スクショと新実装を surface ごとに比較し、`fidelity-report.mjs` でワーストを出す。移行証跡として残す
+- **数値で面を絞ったら、必ず目視レポートで人に見せる**。`fidelity-compare-report.mjs` が
+  `blocks-<surface>.json` と `scan.json` から「閾値(既定10px)以上のブロックを持つ面」だけを拾い、
+  **現行(凍結) / 実装 / 差分ハイライトの3列を連動スクロールで並べた単一 HTML** を出す
+  (`npm run fidelity:compare -- --threshold 10 --serve`)。ratio や dy/dh の数値だけでは
+  「どこがどう違うか」が分からず原因セクションの特定に毎回手作業の crop が要るため、
+  レビュー往復の標準導線にする。実案件では実差20件以上をこの画面から特定した
+  - 単一ページの修正→再確認は `fidelity-scan.mjs --path </page/>`(`--only` は surface 単位で、
+    `unmapped` に大量ページが入る案件では1ページに絞れない)
+  - **diff PNG は `--keep-diffs`(既定50)で ratio 上位ぶんしか保存されない**。compare-report は
+    対象面の diff が無ければ scan と同一条件(threshold 0.1・白パディング)でその場生成する
+  - **スクショのディレクトリ名は `%2Fabout%2F` のような encodeURIComponent 済み文字列**なので、
+    HTTP から参照する URL は `%252Fabout%252F` と二重エンコードが要る。ディレクトリ名全体を
+    1回 `encodeURIComponent` すること(中間の `%2F` を変換し損ねる実装で画像が404になった実例あり)
+- fidelity-scan の ratio は run 間で ±0.08 ぶれる相対指標であり、収束の傾向を見るために使う。A/B は同一セッション連続 run で行い、決定的判定は `node scripts/measure-blocks.mjs` によるブロック単位の DOM 実測とする
 - fidelity-scan の ratio は run 間で ±0.08 ぶれる相対指標であり、収束の傾向を見るために使う。A/B は同一セッション連続 run で行い、決定的判定は `node scripts/measure-blocks.mjs` によるブロック単位の DOM 実測とする
 - **必須計測ブロックを選定・固定する**。全計測ページで header / footer / breadcrumb / main コンテナ / `documentHeight` を測る。surface ごとに代表ページを1つ以上選び、原文の直下セクション単位で主要セクションも列挙する。selector 集合は案件の `blocks.config.json` に固定し、各 selector の選定理由を `reason` に残す。原文に breadcrumb が無い場合はエントリを削除し、その理由を config の `notes` に残す
 - **合格基準はゼロ基準**。必須ブロックすべてで `dy=0` かつ `dh=0` とし、desktop 1280×800 / mobile 375×812 の両 viewport で小数第2位(0.01px)まで比較する。±の許容幅は置かない。例外は `docs/fidelity-approvals.json` に登録した意図的差分だけとする
