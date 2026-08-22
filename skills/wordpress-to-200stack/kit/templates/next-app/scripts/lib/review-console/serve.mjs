@@ -1,0 +1,6 @@
+import { readFile, stat } from "node:fs/promises";
+import { createServer } from "node:http";
+import { extname, resolve, sep } from "node:path";
+
+const types={".html":"text/html; charset=utf-8",".json":"application/json; charset=utf-8",".md":"text/markdown; charset=utf-8",".png":"image/png",".jpg":"image/jpeg",".jpeg":"image/jpeg",".webp":"image/webp",".svg":"image/svg+xml",".txt":"text/plain; charset=utf-8"};
+export function createStaticServer({root,allow}) { const base=resolve(root),allowed=(allow??[]).map((path)=>resolve(path)); return createServer(async(req,res)=>{if(req.method!=="GET"){res.writeHead(405).end("Method not allowed");return;}try{const raw=new URL(req.url??"/","http://localhost").pathname;if(/%2e%2e|\.\./i.test(raw))throw Error("path");const file=resolve(base,`.${decodeURIComponent(raw)}`);if(!file.startsWith(`${base}${sep}`)||!allowed.some(dir=>file===dir||file.startsWith(`${dir}${sep}`)))throw Error("path");if((await stat(file)).isDirectory())throw Error("directory");res.writeHead(200,{"content-type":types[extname(file).toLowerCase()]??"application/octet-stream"}).end(await readFile(file));}catch{res.writeHead(404,{"content-type":"text/plain; charset=utf-8"}).end("Not found");}}); }

@@ -431,15 +431,15 @@ accessible name、form label、iframe title、ARIA参照、画像altの現行基
 #### fidelity: 原文アーカイブとの比較
 
 - `fidelity-scan.mjs` で凍結スクショと新実装を surface ごとに比較し、`fidelity-report.mjs` でワーストを出す。移行証跡として残す
-- **数値で面を絞ったら、必ず目視レポートで人に見せる**。`fidelity-compare-report.mjs` が
-  `blocks-<surface>.json` と `scan.json` から「閾値(既定10px)以上のブロックを持つ面」だけを拾い、
-  **現行(凍結) / 実装 / 差分ハイライトの3列を連動スクロールで並べた単一 HTML** を出す
-  (`npm run fidelity:compare -- --threshold 10 --serve`)。ratio や dy/dh の数値だけでは
-  「どこがどう違うか」が分からず原因セクションの特定に毎回手作業の crop が要るため、
-  レビュー往復の標準導線にする。実案件では実差20件以上をこの画面から特定した
+- **数値で面を絞ったら、必ず目視レポートで人に見せる**。review console(§7)の `fidelity-blocks` /
+  `fidelity-pixel` パネルが `blocks-<surface>.json` と `scan.json` から「閾値(既定10px)以上の
+  ブロックを持つ面」だけを拾い、**現行(凍結) / 実装 / 差分ハイライトの3列を連動スクロールで並べる**
+  (`npm run fidelity:compare -- --threshold 10 --serve`。全ゲートを併せて見るなら `npm run review -- --serve`)。
+  ratio や dy/dh の数値だけでは「どこがどう違うか」が分からず原因セクションの特定に毎回手作業の crop が
+  要るため、レビュー往復の標準導線にする。実案件では実差20件以上をこの画面から特定した
   - 単一ページの修正→再確認は `fidelity-scan.mjs --path </page/>`(`--only` は surface 単位で、
     `unmapped` に大量ページが入る案件では1ページに絞れない)
-  - **diff PNG は `--keep-diffs`(既定50)で ratio 上位ぶんしか保存されない**。compare-report は
+  - **diff PNG は `--keep-diffs`(既定50)で ratio 上位ぶんしか保存されない**。review console は
     対象面の diff が無ければ scan と同一条件(threshold 0.1・白パディング)でその場生成する
   - **スクショのディレクトリ名は `%2Fabout%2F` のような encodeURIComponent 済み文字列**なので、
     HTTP から参照する URL は `%252Fabout%252F` と二重エンコードが要る。ディレクトリ名全体を
@@ -522,8 +522,33 @@ missing は意図した除外だけにし、metaMismatches は0を目標にす�
 | `npm run verify:stylesheets`(`scripts/verify-stylesheets.mjs`) | 各ページの期待 stylesheet 構成 | link構成変更後 |
 | `npm run verify:webvitals-preload`(`scripts/verify-webvitals-preload.mjs`) | preload URL と描画 URL の完全一致 | LCP・画像・preload変更後 |
 | axe-core 差分(§8.6) | 本番アーカイブに対して**違反を増やしていない**こと | DOM・属性・クライアント挙動の変更後 |
+| `npm run review`(`scripts/review-console.mjs`) | 上記すべてと status・fidelity・実機レビュー・attestation を1画面で人が確認できること | レビュー前・差し戻し対応後・公開前 |
 
 fixture は原文から作った期待値であり、**承認付き更新のみ**。現行出力から自動再生成する自己参照にしない。
+
+#### ブラウザで全ゲートを確認する(review console)
+
+```bash
+npm run review -- --serve        # 既定 _scratch/review/index.html を生成し 127.0.0.1:8961 で配信
+```
+
+**このスキルが検証する項目を1画面へ集約した HTML** を出す。scorecard の全 gate、`wpkit status` の全工程、
+6系統 fidelity、実機レビュー、品質 attestation を14パネルに並べ、各項目から根拠(report JSON・
+凍結スクショ・差分画像)へ辿れる。数値ゲートの合否だけを見て「なぜ落ちたか」を毎回 `jq` で掘る往復をなくす。
+
+- **検証ロジックを持たない**。合否の正本は `scorecard.json` のままで、review console は既存の生成物を
+  読んで集約・可視化するだけ。ゲートも build も実行しない(scorecard の command gate は `detail.stdoutJson`、
+  file gate は `detail.evidenceJson` を持っているので、合否とその根拠は scorecard から読める)
+- 状態は `PASS` / `FAIL` / `NOT_RUN` / `STALE` / `REVIEW` / `ATTESTED` / `MANUAL` の7値。
+  **証跡が無いゲートも省略せず**「未実施(探索したパスと実行コマンド付き)」として出す。証跡の artifact binding が
+  現在の `out/` と一致しなければ `STALE`、ゼロ基準に届いていない寸法・ピクセルは `REVIEW`、§6.6 のテンプレ突合や
+  系統(d)(f) のような人手ゲートは `MANUAL` にする。**判定していないものを PASS と表示しない**
+- archive-built の observation は severity / code / route / decision で絞り込め、observation hash と
+  decision ledger 用の JSON 断片をその場でコピーできる。**画面からの書き込みはしない**
+  (台帳・承認をこの画面で更新できるようにしない。ゲートを黙らせる導線を作らないため)
+- 証跡は案件ルート直下と `site/` 配下のどちらに置かれていても探す。`--serve` は `_scratch/` と `docs/` 配下だけを
+  配信し、それ以外と `../` は 404 にする
+- 一部だけ見るときは `--panel <id,...>`(`npm run fidelity:compare` は fidelity 2パネルの別名)
 
 #### scorecard による集約
 

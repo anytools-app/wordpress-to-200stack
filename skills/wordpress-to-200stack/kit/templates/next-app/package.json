@@ -19,7 +19,8 @@
     "artifact:verify": "node scripts/build-artifact.mjs verify",
     "verify:archive-built": "node scripts/archive-built-audit.mjs",
     "verify:fidelity": "npm run verify:archive-built",
-    "fidelity:compare": "node scripts/fidelity-compare-report.mjs",
+    "fidelity:compare": "node scripts/review-console.mjs --panel fidelity-blocks,fidelity-pixel",
+    "review": "node scripts/review-console.mjs",
     "render:archive-built": "node scripts/render-archive-built-audit.mjs --check",
     "live-scenarios": "node scripts/live-scenarios.mjs",
     "fixtures:update": "node scripts/update-archive-fixtures.mjs"
