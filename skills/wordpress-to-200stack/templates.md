@@ -1,6 +1,6 @@
 # wp-migrate テンプレート集
 
-## mapping.config.ts の書式(実例はパイロット案件リポジトリの mapping.config.ts が最良の参照)
+## mapping.config.ts の書式(実例は `kit/e2e/fixtures/golden-mapping.config.ts`)
 
 ```ts
 import { defineMigration } from "./wp-static-kit/src/config.js";
@@ -100,7 +100,7 @@ site/ の Next.js(静的エクスポート)に <route パターン> の表示テ
 
 ## 移植チェックリスト(実装指示書の必須セクション。全単位に同梱し「該当箇所/該当なし」を記入させる)
 
-実案件(案件B)の差し戻し実差から逆引きした10項目。指示書に空欄のまま残さない。
+実案件の差し戻し実差から逆引きした10項目。指示書に空欄のまま残さない。
 
 ```markdown
 ## 移植チェックリスト(各項目に該当箇所 or「該当なし」を記入)

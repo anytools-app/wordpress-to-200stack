@@ -3,6 +3,13 @@
 All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Changed
+
+- 外部公開に向けて、案件名・ドメイン・業種・固有の URL スラッグ・案件を特定できる実測値を、現行ファイルと git 全履歴から除去した。`lessons.md` は全履歴から削除し、案件固有の実測は各案件リポジトリ側(非公開)で管理する方針へ戻した(0.2.0 の「非公開化に伴う方針撤廃」を取り消す)
+- 履歴を書き換えたため、以前のコミット SHA は無効になった。下の各版に出てくる `lessons.md` は当時の構成を指す
+
 ## [0.12.0] - 2026-07-31
 
 ### Added
@@ -91,7 +98,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ### Note
 
-- 契機は 案件A 案件でテーマ入手後に実施した突き合わせ(実装漏れ13件・誤報7件)。実測値は `lessons.md` §12
+- 契機はパイロット案件でテーマ入手後に実施した突き合わせ(実装漏れ13件・誤報7件)
 
 ## [0.4.0] - 2026-07-26
 
@@ -105,9 +112,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ### Changed
 
-- 案件A移行の最終形(ネイティブ実装、CSS Modules、Next.js Data Cache、SiteLink、formrun、fidelity + pixel-gate、verifyスイート、`routing-config.jsonc`)を新規移行のデフォルト成果物へ昇格し、スキル文書を全面改訂
+- パイロット案件の移行の最終形(ネイティブ実装、CSS Modules、Next.js Data Cache、SiteLink、formrun、fidelity + pixel-gate、verifyスイート、`routing-config.jsonc`)を新規移行のデフォルト成果物へ昇格し、スキル文書を全面改訂
 - `modernize.md`を、テーマCSS温存方式で移行済みの既存案件を最終形へ引き上げる手順へ再位置づけ
-- `lessons.md`へ案件Aの実測ノウハウ全11章を取り込み
+- `lessons.md`へパイロット案件の実測ノウハウ全11章を取り込み
 
 ### Note
 

@@ -20,13 +20,11 @@
 
 - microCMS の API キー、S3 互換ストレージの認証情報、`.env` はリポジトリにコミットしません。案件リポジトリ側の `.env.local` に置きます
 - microCMS ドラフトプレビュー(`/preview/`)は**読み取り専用の GET キー**を必須とし、書き込み権限のあるキーを使いません
-- このリポジトリは非公開のため、実案件の知見・実測値・案件名は `skills/wordpress-to-200stack/lessons.md` に記録します。非公開リポジトリでも、認証情報(前項の API キー・トークン・`.env` の中身)、顧客の個人情報・エンドユーザー情報、`_scratch/` の生成物(下記の gitignore 対象)は記録しません
-  - **注意**: `kit/templates/` の一部スクリプト(`modernize-css/scripts/verify-stylesheets.mjs`、`next-app/scripts/lib/surfaces.mjs`)には、パイロット案件のルート構造が既定値としてハードコードされています。案件で使う際は自案件のパスへ置き換えてください
-  - 分離前の履歴(`anytools-agent-skills` から引き継いだコミット)にも、初期の `lessons.md` と `design.md` に案件を特定しうる記述が残っています。非公開化により現行運用上の問題はありませんが、再公開する場合は現行ファイルの内容だけでなく履歴の扱いも検討してください
-- このリポジトリを `claude plugin install` または `~/.claude/skills/` への symlink で配布すると `lessons.md` も一緒に配布されます。案件情報を含むため、配布先を限定してください
+- このリポジトリは公開を前提とします。案件名・ドメイン・業種・固有の URL スラッグ・案件を特定できる実測値、認証情報(前項の API キー・トークン・`.env` の中身)、顧客の個人情報・エンドユーザー情報、`_scratch/` の生成物(下記の gitignore 対象)は、ファイルにもコミットメッセージにも記録しません。案件固有の実測は各案件リポジトリ側(非公開)で管理してください
+  - `kit/templates/` の一部スクリプト(`modernize-css/scripts/verify-stylesheets.mjs`、`next-app/scripts/lib/surfaces.mjs`)には汎用的なルートが既定値として入っています。案件で使う際は自案件のパスへ置き換えてください
 - kit の生成物(`_scratch/` 配下)には移行元サイトの全 HTML・画像・フォーム台帳が入ります。案件リポジトリで gitignore してください
 
-`wpkit` reads from the source WordPress site (never writes to it) with adaptive rate limiting, and writes to the destination microCMS service. The Playwright screenshot stage in `archive` bypasses rate limiting and is the heaviest path against the origin — use `--no-screenshots` to run it separately when origin load is a concern. Credentials stay in the project repository's `.env.local`; draft preview requires a read-only key. Because this repository is private, `lessons.md` may record project names and measured findings, but credentials, personal data, and `_scratch/` artifacts remain excluded.
+`wpkit` reads from the source WordPress site (never writes to it) with adaptive rate limiting, and writes to the destination microCMS service. The Playwright screenshot stage in `archive` bypasses rate limiting and is the heaviest path against the origin — use `--no-screenshots` to run it separately when origin load is a concern. Credentials stay in the project repository's `.env.local`; draft preview requires a read-only key. This repository is intended to be public: it records no client names, domains, client-identifying measurements, credentials, personal data, or `_scratch/` artifacts. Keep project-specific findings in each (private) project repository.
 
 ## サポートされるバージョン / Supported versions
 

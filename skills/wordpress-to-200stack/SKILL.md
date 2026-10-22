@@ -155,7 +155,7 @@ npm run wpkit -- parse --config ../mapping.config.ts -o ../_scratch/ir
 往復させ、「何が生存し何が落ちるか」を実測した仕様書(`_scratch/probe/sanitizer-spec.json`)を作ってから**
 IR 変換・スキーマ・レンダラ設計を確定する(探査用レコードは終了後に削除)。
 
-microCMS richEditorV2 の実測済み仕様(案件B。以後の案件は差分だけ探査すればよい):
+microCMS richEditorV2 の実測済み仕様(実案件で実測。以後の案件は差分だけ探査すればよい):
 
 1. `div` / `aside` / `section` / `figure`(入稿時)と**全 class 属性を除去**
    → 装飾囲みは `blockquote` 等の生存タグへ IR 後処理で変換し、レンダラがマーカー
@@ -351,7 +351,7 @@ export function SiteLink({ href, ...props }: ComponentPropsWithoutRef<"a">) {
 
 旧 URL は **301 の入口**であって内部リンクの行き先ではない。ルート台帳の新パスを使う。
 アーカイブ HTML の `href` をそのまま写すと、全クリックに 301 が1ホップ挟まる
-(実案件で `/item/{id}` のまま残り、実体は `/about-item/{id}/` だった)。
+(実案件で `/items/{id}` のまま残り、実体は `/about-item/{id}/` だった)。
 
 #### 全ページのネイティブ実装ループ
 
@@ -393,7 +393,7 @@ export function SiteLink({ href, ...props }: ComponentPropsWithoutRef<"a">) {
 
 忠実性の完了条件は**6系統の照合がすべて「残差ゼロ or 承認台帳登録済み」になること**。
 初回パイプラインが寸法ブロックだけで scorecard PASS になり、その後テキスト・アニメ・書体・
-静的属性の差し戻しが13ラウンド続いた実案件(案件B)の教訓として、系統は独立に全部回す:
+静的属性の差し戻しが13ラウンド続いた実案件の教訓として、系統は独立に全部回す:
 
 | 系統 | 照合対象 | ツール(テンプレ `scripts/`) | 検出できた実差の例 |
 |---|---|---|---|
@@ -631,4 +631,4 @@ npm run wpkit -- scorecard --config ../scorecard.config.json
 - kit・テンプレート・スキル手順を改訂したら、記録前に `cd kit && npm run e2e`（golden E2E）を実行し、回帰ゼロを確認する
 - kit に案件固有ロジックを入れない。案件差は mapping.config と site/ 側で吸収
 - 案件へピン留めした kit からスキルへ変更を還元するときは、委任先が変更したファイルだけを列挙してコピーする。古いスナップショットを `rsync` で一括同期せず、反映後に `git diff --stat` で対象を照合する
-- 案件で得た WXR・プラグイン固有の癖・事故はこのスキルの `lessons.md` に1行追記する(このリポジトリは非公開なので案件名・実測値を書いてよい)。複数案件で再現した知見に加え、1案件でも案件非依存が明白な外部仕様・FW 挙動・実装パターンは待たずに `SKILL.md` / `design.md` / `recipes.md` へ昇格し、`lessons.md` には案件固有の実測値・経緯だけを残す。認証情報・個人情報・`_scratch/` の生成物は書かない
+- 案件で得た WXR・プラグイン固有の癖・事故は案件リポジトリ側(非公開)に記録する。このスキルのリポジトリは公開リポジトリなので、案件名・ドメイン・業種・固有の URL スラッグ・案件を特定できる実測値を書かない。複数案件で再現した知見に加え、1案件でも案件非依存が明白な外部仕様・FW 挙動・実装パターンは待たずに、案件を特定できない形へ一般化してから `SKILL.md` / `design.md` / `recipes.md` へ昇格する。認証情報・個人情報・`_scratch/` の生成物は書かない
