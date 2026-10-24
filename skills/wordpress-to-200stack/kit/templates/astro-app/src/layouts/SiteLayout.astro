@@ -1,0 +1,29 @@
+---
+interface Props { title: string; description?: string; canonical?: string; noindex?: boolean; lang?: string; }
+const { title, description = "", canonical = Astro.url.pathname, noindex = false, lang = "ja" } = Astro.props;
+const url = new URL(canonical, Astro.site);
+---
+<!doctype html>
+<html lang={lang}>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{title}</title>
+    <meta name="description" content={description} />
+    <link rel="canonical" href={url} />
+    <meta name="robots" content={noindex ? "noindex, nofollow" : "index, follow"} />
+    <meta property="og:title" content={title} />
+    <meta property="og:description" content={description} />
+    <meta property="og:url" content={url} />
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="Site" />
+    <meta property="og:locale" content={lang === "ja" ? "ja_JP" : lang} />
+    <meta name="twitter:card" content="summary_large_image" />
+    <slot name="head" />
+  </head>
+  <body><slot /></body>
+</html>
+<style>
+  :global(body) { margin: 0; font-family: sans-serif; }
+  :global(main) { max-width: 70rem; margin: auto; padding: 1.5rem; }
+</style>

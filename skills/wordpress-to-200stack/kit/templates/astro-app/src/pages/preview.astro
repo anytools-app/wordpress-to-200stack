@@ -1,0 +1,8 @@
+---
+import SiteLayout from "../layouts/SiteLayout.astro";
+import { PreviewClient } from "../components/PreviewClient";
+---
+<SiteLayout title="microCMS Preview" canonical="/preview/" noindex>
+  <meta slot="head" name="referrer" content="no-referrer" />
+  <PreviewClient client:only="react" />
+</SiteLayout>

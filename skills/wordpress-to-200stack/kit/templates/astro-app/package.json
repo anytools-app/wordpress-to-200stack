@@ -1,0 +1,53 @@
+{
+  "name": "wp-static-kit-astro-app",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "astro dev",
+    "build": "node scripts/build-app.mjs",
+    "start": "astro preview",
+    "typecheck": "astro check",
+    "format": "prettier --write \"src/**/*.{astro,ts,tsx}\"",
+    "lint": "prettier --check \"src/**/*.{astro,ts,tsx}\"",
+    "lint:fix": "prettier --write \"src/**/*.{astro,ts,tsx}\"",
+    "verify:t6": "node scripts/verify-t6.mjs",
+    "verify:routes": "node scripts/verify-routes.mjs",
+    "verify:seo": "node scripts/verify-seo.mjs",
+    "verify:stylesheets": "node scripts/verify-stylesheets.mjs",
+    "verify:webvitals-preload": "node scripts/verify-webvitals-preload.mjs",
+    "artifact:create": "node scripts/build-artifact.mjs create",
+    "artifact:verify": "node scripts/build-artifact.mjs verify",
+    "verify:archive-built": "node scripts/archive-built-audit.mjs",
+    "verify:fidelity": "npm run verify:archive-built",
+    "fidelity:compare": "node scripts/review-console.mjs --panel fidelity-blocks,fidelity-pixel",
+    "review": "node scripts/review-console.mjs",
+    "render:archive-built": "node scripts/render-archive-built-audit.mjs --check",
+    "live-scenarios": "node scripts/live-scenarios.mjs",
+    "fixtures:update": "node scripts/update-archive-fixtures.mjs"
+  },
+  "dependencies": {
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "sanitize-html": "^2.16.0",
+    "astro": "^7.4.2",
+    "@astrojs/react": "^7.1.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@types/sanitize-html": "^2.16.0",
+    "linkedom": "^0.18.13",
+    "pixelmatch": "^7.2.0",
+    "playwright": "^1.61.1",
+    "pngjs": "^7.0.0",
+    "typescript": "^5.0.0",
+    "@astrojs/check": "^0.9.12",
+    "prettier": "^3.6.2",
+    "prettier-plugin-astro": "^0.14.1"
+  },
+  "type": "module",
+  "engines": {
+    "node": ">=22.23.4"
+  }
+}

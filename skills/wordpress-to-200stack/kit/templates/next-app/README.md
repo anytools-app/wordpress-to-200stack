@@ -198,6 +198,29 @@ fidelity approvalのmeasurement sourceにarchive reportを指定する場合は�
 ファイル実在を検証します。オフライン実行を前提とするため remote URL の到達性は検証せず、
 スキップしたことをレポートします。
 
+### SEO 契約ゲート
+
+`verify:seo` は保存済み archive、ローカル `out/`、`seo-contract.config.json`、`docs/seo-intentional-diffs.json`
+だけを入力にします。現行 WordPress や本番 URL へはアクセスしません。
+
+`seo-contract.config.json` は案件ごとの route family / locale / metadata 契約です。各出力routeは
+ちょうど1つのfamilyへ所属させ、`urlPolicy.trailingSlash` で公開URL形状も宣言します。雛形は意図的に
+`"status": "draft"` で同梱しているため、そのままでは `verify:seo` はPASSしません。案件で以下を決めてから
+`"approved"` にしてください。
+
+- route familyごとの必須field、期待値、field同士の一致条件。
+- `html:lang`、H1数・H1文言、canonical、OGP、Twitter cardの扱い。
+- social imageの由来。旧サイトのどの値を採用するか、候補値が分かれるcontrastive sample、候補が1つだけならその理由。
+- 旧sitemapにあったindexable URLを出力から消す場合の分類。`preserve`、`redirect`、承認済み`retire`のどれにも入らないURLはfailです。`retire` には理由、承認者、承認日、検索影響資料またはwaiverが必要です。
+- 旧sitemapは既定で必須です。取得不能の場合だけ `archiveSitemap.required:false` とし、`waiver` に理由、承認者、承認日を記録します。ファイルの取り忘れはfailです。
+
+URL比較は lookup 用の正規化と公開URLの完全一致を分けます。`trailingSlash: true` の案件では
+`/company` と `/company/` をcanonical / `og:url` / sitemap上で同一視しません。
+意図差分は `docs/seo-intentional-diffs.json` にroute・item・理由を登録します。広いallowlistではなく、
+実際に観測された差分を確認して最小範囲で記録してください。OGP/Twitter画像fieldの差分はfamily全体の
+`/**` では抑制できないため、確認したrouteを完全一致で指定します。理由なし、重複、観測差分に対応しない
+未使用entryもfailです。
+
 案件リポジトリのルートで scorecard の品質定義を生成・コミットし、公開前に総合判定を確認します。
 
 ```sh

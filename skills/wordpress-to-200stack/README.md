@@ -1,6 +1,6 @@
 # wordpress-to-200stack — WordPress 静的サイト移行
 
-WordPress サイトを **microCMS + formrun + Next.js 静的エクスポート**に変換して **200stack** にデプロイするための移行スキルです。固定ページ・記事テンプレともネイティブ JSX + CSS Modules で実装し、旧テーマ CSS は成果物へ持ち込みません。同梱の決定的 CLI(`wpkit`)が機械的な処理を担い、スキル本文(`SKILL.md`)が判断と品質ゲートを定めます。
+WordPress サイトを **microCMS + formrun + Next.js / Astro 静的サイト**に変換して **200stack** にデプロイするための移行スキルです。固定ページ・記事テンプレは選択したフレームワークで実装し、旧テーマ CSS は成果物へ持ち込みません。同梱の決定的 CLI(`wpkit`)が機械的な処理を担い、スキル本文(`SKILL.md`)が判断と品質ゲートを定めます。
 
 **Note: this skill is written in Japanese.**
 
@@ -12,7 +12,7 @@ WXR(WordPress エクスポート XML)の分析から公開までを、ゲート�
 0. archive(現行サイトの凍結)→ 1. analyze → 2. mapping config(製品判断)
 → 3. parse(ゲート1: errors 0)→ 4. media(ゲート2)
 → 5. schema gen → microCMS作成 → import(ゲート3。実装の前提)
-→ 6. next-app展開 → ネイティブ実装ループ(6系統fidelity)
+→ 6. Next.js / Astroひな形展開 → ネイティブ実装ループ(6系統fidelity)
 → artifact-bound archive-built strict parity(文言・属性・common chrome・route intent)
 → 7. verifyスイート→ required gateをscorecard集約(ゲート4)→ 8. 200stack公開
 ```
@@ -20,8 +20,12 @@ WXR(WordPress エクスポート XML)の分析から公開までを、ゲート�
 - **決定的な処理は `wpkit`**(`kit/` 同梱): WXR 解析、画像移行、microCMS スキーマ生成・冪等入稿、新旧照合。保存archive対builtの差分はSHA-256 observationとexact decision ledgerで裁定し、build artifactへ束縛
 - **進行台帳は `wpkit status`**: 案件ルートにコミットする `migration-state.json` で gate・承認・次工程を追跡し、台帳がある案件だけ後段の前提を強制
 - **判断はスキル(司令塔)**: 移行スコープ・フィールド型・404/301 の裁定などの製品判断はユーザーに確認
-- **成果物は straight-to-final**: 固定ページは`src/app/<page>/page.tsx`、CMS記事は一覧+`[id]`+`src/templates/`、全てCSS Modules。内部リンクはSiteLink(`next/link`)、フォームはformrun
-- **テンプレのデザイン実装は [delegate](https://github.com/anytools-app/anytools-agent-skills/blob/main/skills/delegate/README.ja.md) スキルで Codex へ委任**
+- **成果物は straight-to-final**: Next.jsはApp Router + CSS Modules、Astroは`src/pages/` + scoped style / CSS Modules。CMS記事は共通registry、フォームはformrun
+- **テンプレのデザイン実装は実行中のエージェントが担当**。Codexから直接実行でき、委任スキルは必須ではない
+
+## Codex / Claude Codeからの利用
+
+導入方法はリポジトリルートの [README.md](../../README.md#インストール) を参照してください。Codexでは `.agents/skills/` で検出し、`$wordpress-to-200stack` で呼び出します。スキル本体と同梱kitは両環境で共通です。
 
 ## セットアップ
 
@@ -33,6 +37,20 @@ cd <案件>/wp-static-kit && npm install && npx playwright install chromium
 ```
 
 生成物はすべて案件リポジトリの `_scratch/`(gitignore)に置きます。
+
+## Next.js / Astroの選択
+
+kitを案件へコピーした後、次のコマンドで新しいsiteディレクトリへ展開します。
+
+```bash
+cd <案件>/wp-static-kit
+npm run wpkit -- scaffold --framework astro --out-dir ../site
+# Next.jsなら --framework next
+cd ../site
+npm ci
+```
+
+Astroも静的HTMLを `out/` へ出力し、既存のSEO・URL・フォーム・fidelity・scorecardを使います。詳細は [フレームワーク別の手順](references/frameworks.md) を参照してください。
 
 ## 構成
 
@@ -51,7 +69,7 @@ skills/wordpress-to-200stack/
 
 ## 前提
 
-- Claude Code。スキル本文は日本語
+- Codex または Claude Code。スキル本文は日本語
 - Node.js + npm(kit の実行)、Playwright Chromium(archive のスクリーンショット)
 - microCMS アカウント(API 数はプラン上限に注意: Hobby 5 / Team 10)
 - 200stack のデプロイ先

@@ -1,4 +1,4 @@
-# wp-static-kit 設計書 — WordPress → microCMS + Next.js 静的サイト移行基盤
+# wp-static-kit 設計書 — WordPress → microCMS + Next.js / Astro 静的サイト移行基盤
 
 目的: WordPress サイトの静的リニューアル案件を「決定的なスクリプト群 + Claude Code スキル」で再現可能にし、
 案件あたりの人手作業を大幅に圧縮する。
@@ -12,7 +12,7 @@ SKILL / design が kit の挙動として記述する事項は、変更時に ki
 - **決定的な処理はすべて CLI スクリプト**(wp-static-kit): 同じ入力から同じ出力。人もAIも判断しない
 - **判断はスキル**(wp-migrate): マッピング設計・品質ゲート・委任手順の「規約」。Claude Code が司令塔として実行
 - **ネイティブ実装は AI 委任**(delegate 規約に従い Codex へ)。スキルが記事・固定ページ共通の指示書テンプレを提供する
-- **デフォルト成果物**: microCMS + Next.js App Router の静的エクスポート。固定ページ・CMS記事ともネイティブ JSX + CSS Modules、内部リンクは SiteLink、フォームは formrun。旧テーマ CSS は参照素材としてだけ使い、成果物へ持ち込まない
+- **成果物**: microCMS + 選択したNext.js / Astroの静的出力。フレームワーク対応は `references/frameworks.md`。以下のNext.js構成例では、固定ページ・CMS記事ともネイティブ JSX + CSS Modules、内部リンクは SiteLink、フォームは formrun。旧テーマ CSS は参照素材としてだけ使い、成果物へ持ち込まない
 
 ```
 wp-static-kit/                     # 独立リポジトリ(npm workspace / TypeScript)
@@ -232,6 +232,14 @@ analyze が config の雛形(フィールド定義込み)を自動生成し、�
 固定ページ(通常は `page`)は `exclude.postTypes` で IR / microCMS の対象外にし、移行後も存在する URL を
 `linkCheck.assumeExistPostTypes` / `assumeExistPaths` へ登録する。記事本文の `legacyBodyHtml` 方針は維持し、
 固定ページへ流用しない。
+
+## フレームワーク別スケルトン
+
+`wpkit scaffold --framework next|astro --out-dir <新規site>` で選択する。Astro固有の差分は `templates/astro-app` に置き、監査・正規化・repository・サニタイザ・記事registryはNextテンプレート側の共通ソースから合成する。生成サイトはkitへ実行時依存しない。
+
+Astroはstatic出力・directory形式・末尾slashあり・`out/` を採用する。固定ページは `.astro`、記事は `getStaticPaths` + ビルド時Reactレンダラ、ドラフトだけ同じレンダラを使うReact island。取得はNext Data Cacheに依存しないbuild/devのPromise snapshot。詳しい選択基準と対応は `references/frameworks.md`。
+
+以下のApp Router・Data Cache・React固有の規約はNext.js向け。Astroには同参照の対応規約を適用し、原文忠実性と品質ゲートは共通とする。
 
 ## Next.js スケルトン(templates/next-app)
 

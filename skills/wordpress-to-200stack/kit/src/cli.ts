@@ -14,6 +14,7 @@ import { uploadMedia } from "./media/upload.js";
 import { importDocuments } from "./microcms/import.js";
 import { writeSchemas } from "./microcms/schema.js";
 import { loadMigrationConfig, parseConfigFile } from "./parse/index.js";
+import { scaffoldSite } from "./scaffold/index.js";
 import { initScorecardConfig, runScorecard } from "./scorecard/index.js";
 import { approveStatusGate, enforceGate, getStatus, initStatus, renderStatus } from "./status/index.js";
 import { verifySite } from "./verify/index.js";
@@ -290,13 +291,22 @@ scorecard
 
 scorecard
   .command("init")
-  .requiredOption("--site <siteDir>", "Next.js app directory")
+  .requiredOption("--site <siteDir>", "Next.js or Astro app directory")
   .option("--config <path>", "output scorecard.config.json path")
   .option("--force", "overwrite an existing config")
   .action(async (options: { site: string; config?: string; force?: boolean }) => {
     const result = await initScorecardConfig({ siteDir: options.site, configPath: options.config, force: options.force });
     for (const warning of result.warnings) console.error(`scorecard init warning: ${warning}`);
     console.log(JSON.stringify({ configPath: result.configPath, gates: result.config.gates.length, warnings: result.warnings.length }));
+  });
+
+program
+  .command("scaffold")
+  .description("Create a Next.js or Astro static site with shared migration audits")
+  .requiredOption("--framework <framework>", "next or astro")
+  .requiredOption("-o, --out-dir <outDir>", "new site directory (must not exist)")
+  .action(async (options: { framework: string; outDir: string }) => {
+    console.log(JSON.stringify(await scaffoldSite(options)));
   });
 
 program.parseAsync(process.argv).catch((error: unknown) => {

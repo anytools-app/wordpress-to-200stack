@@ -1,11 +1,20 @@
 ---
 name: wordpress-to-200stack
-description: WordPress サイトを microCMS + formrun + Next.js 静的エクスポートへ移行し、固定ページ・記事テンプレをネイティブ実装(CSS Modules)して 200stack にデプロイする手順。WXR・画像・コンテンツ移行、microCMS schema/import、6系統fidelity、保存archive対builtの文言・alt/aria・common chrome・route intent監査、artifact-bound strict parity、scorecard、公開までを決定的 CLI(wpkit)で進める。トリガー例:「WordPressを移行して」「WXRからmicroCMSへ」「wpkitで移行」「WordPressを200stackに」「静的サイト化して」「移行差分を監査して」「現行文言・属性を維持して」「WordPressサイトをNext.jsにリニューアル」。
+description: WordPress サイトを microCMS + formrun + Next.js または Astro の静的サイトへ移行し、固定ページ・記事テンプレをネイティブ実装(CSS Modules)して 200stack にデプロイする手順。WXR・画像・コンテンツ移行、microCMS schema/import、6系統fidelity、保存archive対builtの文言・alt/aria・common chrome・route intent監査、artifact-bound strict parity、scorecard、公開までを決定的 CLI(wpkit)で進める。トリガー例:「WordPressを移行して」「WXRからmicroCMSへ」「wpkitで移行」「WordPressを200stackに」「静的サイト化して」「移行差分を監査して」「現行文言・属性を維持して」「WordPressサイトをNext.jsにリニューアル」「WordPressをAstroへ移行」。
 ---
 
-# WordPress → microCMS + Next.js 静的サイト → 200stack 移行
+# WordPress → microCMS + Next.js / Astro 静的サイト → 200stack 移行
 
-役割分担: **決定的な処理は同梱の wpkit(`kit/`)、判断はこのスキル(司令塔)、テンプレのデザイン実装は delegate スキルで Codex へ委任**。
+役割分担: **決定的な処理は同梱の wpkit(`kit/`)、判断・テンプレのデザイン実装・検証はこのスキルを実行中のエージェントが担当**。Codex / Claude Codeで共通の手順を使う。
+
+## 実行環境とパス
+
+- Codexでは `$wordpress-to-200stack` で呼び出す。Claude Codeでも同じスキル本体を使う
+- `kit/`、`templates.md`、`recipes.md` 等の相対パスは、読み込んだ `SKILL.md` のディレクトリを基準に解決する。カレントディレクトリや `~/.claude/` 固定のパスを前提にしない
+- Codexがメインのときは自身で実装・レビュー・検証まで進める。別のCodex CLIやdelegateスキルの起動は必須ではない
+- 委任する場合だけ、利用可能な委任スキルと案件の指示に従う。委任できない環境でも品質ゲートは省略しない
+- ブラウザ検証は実行環境で利用できるブラウザツールまたは同梱Playwrightを使う。権限不足はその操作に限って解決し、未実行の検証を完了扱いにしない
+- microCMSへの書き込み、公開、DNS切替等は、ユーザーから許可された対象と操作の範囲で実行する
 
 ## セットアップ(案件開始時に1回)
 
@@ -24,7 +33,7 @@ cd <案件>/wp-static-kit && npm install && npx playwright install chromium
 ## 全体フロー(ゲート順)
 
 ```
-0. archive(`archive`: 現行凍結)→ 1. analyze(`analyze`) → 2. mapping config(`mapping`: 製品判断)→ 2.5 SCF(`scf-fields`) → 3. parse(`parse`: ゲート1)
+0. archive(`archive`: 現行凍結)→ 1. analyze(`analyze`) → 2. mapping config(`mapping`: 製品判断)→ 2.1 SEO contract → 2.5 SCF(`scf-fields`) → 3. parse(`parse`: ゲート1)
 → 4. media(`media`: ゲート2)→ 5. schema gen → microCMS作成 → import(`schema-import`: ゲート3。実装の前提)
 → 6. next-app 展開・実装(`implement`) → fidelity(`fidelity`) → 原文突き合わせ(`theme-crosscheck`) → 7. verify / scorecard(`verify`: ゲート4)
 → 8. 200stack 公開(`publish`)
@@ -98,6 +107,27 @@ npm run wpkit -- analyze <export.xml> -o ../_scratch/analysis
   管理画面で編集を続けられる)。richEditorV2 はサニタイザが強く、**入稿前に「サニタイザ往復探査」
   (§3.5)で生存構造を確定し、落ちる構造は IR 後処理+レンダラ補償で吸収する**。
   編集運用が不要な read-only アーカイブ案件に限り、素の textArea(HTML文字列)でもよい
+
+### 2.1 SEO migration contract(実装前ゲート)
+
+SEOを `route family × locale × source semantics × deployed state` の契約として固定する。
+`seo-contract.config.json` は初期値が `status:"draft"` であり、次を埋めて `approved` にするまで
+実装完了・`verify:seo` PASSとして扱わない。schemaと調査手順は `references/seo-migration-contract.md` が正。
+
+- 全旧URLを `preserve` / `redirect` / `retire` へ分類する。`retire` は理由、承認者、日付、
+  Search Console等の検索影響資料または取得不能waiverを必須にし、暗黙のコンテンツ削除を許可しない
+- 旧sitemapはarchiveへ保存して全URL分類の入力にする。旧サイトがsitemapを公開していなかった等で取得不能なら、
+  `archiveSitemap.required:false` と理由・承認者・承認日を持つwaiverを明示し、単なる取り忘れでは通さない
+- 全出力routeがちょうど1つのfamilyへ属するよう、locale、indexability、H1 count/text、`html:lang`、
+  canonical、`og:url`、sitemap、OGP/Twitter必須fieldと固定値を宣言する。新localeも比較元なしで免除しない
+- social imageは旧 `og:image`、featured、gallery、一覧画像、共通fallbackの選択規則を推定する。
+  候補が異なるcontrastive sampleを最低1件使い、候補が1つだけなら理由を残す。案件で得た選択順を汎用既定にしない
+- Search Consoleを利用できる場合は公開前のページ別click / impressionをURL台帳へ結合する。
+  流入のあるURLのretireは明示承認なしに進めない
+- source、local build、CMS draft preview、deployment preview、production、CDN readbackを別証拠laneにする
+
+1件の移行回帰を見つけたら、その症状だけを直して閉じず、同じfamily・localeの兄弟routeを全件機械監査する。
+代表2〜3件のサンプルは視覚確認と公開後readbackに限定し、SEO/URLのオフライン検証は全出力routeを対象にする。
 
 ### 2.5 SCF 定義の復元と現行管理画面のフィールド精査
 
@@ -272,18 +302,25 @@ npm run wpkit -- import --ir ../_scratch/ir --dry-run   # oversized 0 を確認 
 - **入稿プロセスは同時1つ**。新規 PUT・自動採番を並走させない
 - 大量メディアアップロードは 429 帯がある(実測では1,916枚連続後)。`Retry-After` と指数バックオフで回復させる
 
-### 6. ネイティブ実装(デフォルト成果物)
+### 6. ネイティブ実装(フレームワーク選択)
 
-`cp -R kit/templates/next-app <案件>/site` で展開し、**サンプル入稿済みの microCMS 直取得で実装する**。ゲート3は実装の前提であり、前段データ生成やテーマ互換の中間機構を作らない。実装・診断の定石は `recipes.md` を参照する。
+工程2で案件に採用する `next` / `astro` を決め、`references/frameworks.md` の対応表と選択した方式の手順を読む。ユーザー指定と既存案件の構成を優先する。Astroを選んだ場合は、以下のNext.js固有の取得・ルーティング・リンク・CSS記述を同参照のAstro方式へ置き換える。
 
-#### 成果物の姿
+```bash
+npm run wpkit -- scaffold --framework astro --out-dir ../site   # Astro
+# Next.jsの場合: --framework next
+```
+
+scaffoldで選んだひな形を展開し、**サンプル入稿済みの microCMS 直取得で実装する**。ゲート3は実装の前提であり、前段データ生成やテーマ互換の中間機構を作らない。実装・診断の定石は `recipes.md` を参照する。
+
+#### 成果物の姿(以下のパス例はNext.js。Astroは `references/frameworks.md`)
 
 - 固定ページ: `src/app/<page>/page.tsx` + ページローカル `page.module.css` + `metadata`
 - CMS 記事: `src/app/<surface>/page.tsx`(一覧) + `src/app/<surface>/[id]/page.tsx`(詳細) + `src/templates/`。`generateStaticParams` は microCMS の contentId から導出する
 - 旧テーマ CSS は成果物へ持ち込まない。アーカイブの CSS・HTML・スクショは、値・DOM順・見た目を読み取る参照素材とピクセル比較の基準に限定する
 - **microCMS ドラフトプレビュー(`/preview/` CSR シェル)はデフォルト成果物**。読み取り専用 GET キー、実画面と同一テンプレ、draftKey 任意、noindex、sitemap 除外を守る。仕様は `design.md`
 
-#### データ取得は Next.js Data Cache に一本化
+#### Next.jsのデータ取得は Data Cache に一本化
 
 キャッシュ方針は `src/lib/content/client.ts` だけが決める。
 
@@ -293,7 +330,7 @@ npm run wpkit -- import --ir ../_scratch/ir --dry-run   # oversized 0 を確認 
 
 dev 中の microCMS 更新はサーバー再起動不要で、最大5秒待ってリロードすれば反映される。
 
-#### 内部リンクは SiteLink
+#### Next.jsの内部リンクは SiteLink
 
 内部リンクを素の `<a>` にしない。`src/components/SiteLink.tsx` を単一の窓口にする。
 
@@ -324,7 +361,7 @@ export function SiteLink({ href, ...props }: ComponentPropsWithoutRef<"a">) {
 
 **1ルール=1所有ファイル。値を二重定義しない。**
 
-1. 単一のルート・テンプレ・コンポーネント固有 → そのサーフェスの CSS Module
+1. 単一のルート・テンプレ・コンポーネント固有 → そのサーフェスの CSS Module。Astroの `.astro` はscoped `<style>` も使える
 2. 複数サーフェス共有クラスタ → `src/styles/` の共有 Module。既存クラスを受ける場合は `:where(.root) :global(.c-...)` とし、祖先へ root class を付ける
 3. 要素リセット・基本フォント → `globals-reset.css`
 4. 横断 utility → 専用 utility ファイル
@@ -357,23 +394,23 @@ export function SiteLink({ href, ...props }: ComponentPropsWithoutRef<"a">) {
 
 1. アーカイブの HTML・スクショを原文として、文言、リンク、画像、DOM順、レスポンシブ挙動を読む
 2. **原文テンプレ(`_scratch/wp-theme/`)の該当ファイルを開き、条件分岐と JS を確認する**(§6.6)
-3. `page.tsx` / `src/templates/` + CSS Modules + SiteLink でネイティブ実装する
+3. 選んだ方式のページ / `src/templates/` + CSS Modules(Astroはscoped styleも可) + SiteLink でネイティブ実装する
 4. §6.5 のピクセル比較で差分を発見し、機能(フォーム・リンク・メタ)も照合する
 5. 差分修正と再比較を収束まで繰り返す
 
-ページは難易度順に進める。最初に単純な1ページで JSX・metadata・CSS所有権・画像・比較手順を確立し、承認後にフォームや複雑なレイアウトへ展開する。
+ページは難易度順に進める。最初に単純な1ページでページ構造・head/metadata・CSS所有権・画像・比較手順を確立し、承認後にフォームや複雑なレイアウトへ展開する。
 
-#### 委任指示書の規律
+#### 実装・委任指示書の規律
 
-記事系・固定ページとも `templates.md` の雛形を使い、次を必ず含める。
+記事系・固定ページとも `templates.md` の雛形を使い、次を必ず含める。直接実装する場合も同じ完了条件・移植チェックリストを適用する。
 
 1. 完了条件は**ピクセル比較の収束 + 機能一致(フォーム・リンク・メタ)**。DOM タグ実体数一致は完了条件にしない。RSC ペイロードで substring が2倍に見える等の構造診断には使ってよい
-2. jQuery プラグイン(imgLiquid / slick / lity)の見た目は CSS + React で代替する。カルーセルは scroll-snap 等を使い、旧ライブラリやテーマ CSS を持ち込まない
+2. jQuery プラグイン(imgLiquid / slick / lity)の見た目は CSS + 選択した方式のJS/コンポーネントで代替する。カルーセルは scroll-snap 等を使い、旧ライブラリやテーマ CSS を持ち込まない
 3. 原文の DOM 順・視覚順を尊重する。float 回り込み等の診断に有効だが、構造の完全一致は要求しない
 4. フォームは formrun の action・input name を原文と完全一致させる
 5. 対象ページ・部品に関係する `recipes.md` のレシピを指示書へ本文ごと転記する。リンクだけにしない
-6. Codex sandbox は 127.0.0.1 への listen も不可(`listen EPERM`)。ローカルサーバーが必要な
-   ピクセル比較・DOM 実測は司令塔が実行し、差分を委任先へ戻す往復にする
+6. ローカルサーバーの起動可否は実行環境で確認する。`listen EPERM` 等で制限される場合は、
+   許可された環境でピクセル比較・DOM実測を行う。委任時は司令塔が結果を受け取り、差分を戻す
 7. **指示書に載せる原文値(テキスト・CSS値・DOM構造)は司令塔が機械抽出したものだけにする**。
    「原文を参考に書き起こして」と委任すると無意識の校正(語尾・全角半角・約物)が混入する
    (実案件で複数件)。テキストは実行後DOMから抽出、CSS はカスケード勝者値(生成元ファイル・
@@ -385,7 +422,7 @@ export function SiteLink({ href, ...props }: ComponentPropsWithoutRef<"a">) {
 
 レビューは司令塔が typecheck / build / Playwright の desktop・mobile 実画面比較で行う。
 
-**デフォルトにしない方式**: テーマ CSS のページ単位読込、class-map、fixed-pages(凍結 HTML 配信)、アーカイブ原文 HTML の汎用注入、postbuild の body 属性注入、IR を前段生成して描画時に合成する方式、独自リダイレクト生成器は作らない。いずれも実案件で作った後に撤去された中間機構であり、dev/静的出力の乖離、カスケード事故、二重の正本を生む。必要な機能は Next.js + microCMS + CSS Modules へ直接実装する。
+**デフォルトにしない方式**: テーマ CSS のページ単位読込、class-map、fixed-pages(凍結 HTML 配信)、アーカイブ原文 HTML の汎用注入、postbuild の body 属性注入、IR を前段生成して描画時に合成する方式、独自リダイレクト生成器は作らない。いずれも実案件で作った後に撤去された中間機構であり、dev/静的出力の乖離、カスケード事故、二重の正本を生む。必要な機能は選択したフレームワーク + microCMS + 所有範囲が明確なCSSへ直接実装する。
 
 ### 6.5 fidelity(原文比較)と pixel-gate(退行検知)
 
@@ -444,7 +481,6 @@ accessible name、form label、iframe title、ARIA参照、画像altの現行基
   - **スクショのディレクトリ名は `%2Fabout%2F` のような encodeURIComponent 済み文字列**なので、
     HTTP から参照する URL は `%252Fabout%252F` と二重エンコードが要る。ディレクトリ名全体を
     1回 `encodeURIComponent` すること(中間の `%2F` を変換し損ねる実装で画像が404になった実例あり)
-- fidelity-scan の ratio は run 間で ±0.08 ぶれる相対指標であり、収束の傾向を見るために使う。A/B は同一セッション連続 run で行い、決定的判定は `node scripts/measure-blocks.mjs` によるブロック単位の DOM 実測とする
 - fidelity-scan の ratio は run 間で ±0.08 ぶれる相対指標であり、収束の傾向を見るために使う。A/B は同一セッション連続 run で行い、決定的判定は `node scripts/measure-blocks.mjs` によるブロック単位の DOM 実測とする
 - **必須計測ブロックを選定・固定する**。全計測ページで header / footer / breadcrumb / main コンテナ / `documentHeight` を測る。surface ごとに代表ページを1つ以上選び、原文の直下セクション単位で主要セクションも列挙する。selector 集合は案件の `blocks.config.json` に固定し、各 selector の選定理由を `reason` に残す。原文に breadcrumb が無い場合はエントリを削除し、その理由を config の `notes` に残す
 - **合格基準はゼロ基準**。必須ブロックすべてで `dy=0` かつ `dh=0` とし、desktop 1280×800 / mobile 375×812 の両 viewport で小数第2位(0.01px)まで比較する。±の許容幅は置かない。例外は `docs/fidelity-approvals.json` に登録した意図的差分だけとする
@@ -517,14 +553,18 @@ missing は意図した除外だけにし、metaMismatches は0を目標にす�
 |---|---|---|
 | `npm run typecheck` / `npm run lint` | 型 / lint・format | 常時 |
 | `npm run verify:t6`(`scripts/verify-t6.mjs`) | フォーム構造と承認済み fixture の一致 | フォーム・ページ変更後 |
-| `npm run verify:routes`(`scripts/verify-routes.mjs`) | 旧URL台帳を新routeまたは301で全カバー、重複0。`out/` の実在パスと照合 | URL・ID・リダイレクト変更後 |
-| `npm run verify:seo`(`scripts/verify-seo.mjs`) | title / description / robots / canonical / OGP / JSON-LD / sitemap / preview noindex | SEO・ルート変更後 |
+| `npm run verify:routes`(`scripts/verify-routes.mjs`) | 旧URL台帳を新routeまたは301で全カバー、重複0、`out/` route と canonical の公開URL完全一致。末尾slashは丸めない | URL・ID・リダイレクト変更後 |
+| `npm run verify:seo`(`scripts/verify-seo.mjs`) | title / description / robots / canonical / H1 / html lang / OGP+Twitter画像 / JSON-LD / sitemap / preview noindex / 旧sitemap消失route分類 | SEO・ルート変更後 |
 | `npm run verify:stylesheets`(`scripts/verify-stylesheets.mjs`) | 各ページの期待 stylesheet 構成 | link構成変更後 |
 | `npm run verify:webvitals-preload`(`scripts/verify-webvitals-preload.mjs`) | preload URL と描画 URL の完全一致 | LCP・画像・preload変更後 |
 | axe-core 差分(§8.6) | 本番アーカイブに対して**違反を増やしていない**こと | DOM・属性・クライアント挙動の変更後 |
 | `npm run review`(`scripts/review-console.mjs`) | 上記すべてと status・fidelity・実機レビュー・attestation を1画面で人が確認できること | レビュー前・差し戻し対応後・公開前 |
 
 fixture は原文から作った期待値であり、**承認付き更新のみ**。現行出力から自動再生成する自己参照にしない。
+
+SEO契約の作成・更新は §2.1、schemaと調査手順は `references/seo-migration-contract.md` を正とする。
+H1はCSS表示状態で落とさず、canonical / `og:url` / sitemap / 内部hrefはlookup正規化と公開URL完全一致を
+分ける。OGP画像はURLだけでなく `secure_url` / type / width / height / alt とTwitter画像まで検査する。
 
 #### ブラウザで全ゲートを確認する(review console)
 
@@ -576,8 +616,9 @@ npm run wpkit -- scorecard --config ../scorecard.config.json
 2. `routing-config.jsonc` を旧URL301の正本として確定する。200stack が適用し、凍結・手編集する。`verify:routes` で `out/` の実在パスとの全カバー・重複0を担保する
 3. 200stack でサイトを作成し、microCMS webhook → 200stack webhook 受信 API を接続する
 4. release スクリプトで検証ゲート通過を確認し、バージョン更新・タグ・pushを行う。200stack の自動デプロイを正とする
-5. 少RAM環境では `BUILD_MEMORY_LIMIT_MB` を設定する。ラッパーが webpack へ切替え、ワーカー数と heap を制約する。Turbopack のネイティブメモリは実質制御不能
-6. カスタムドメイン・SSL・DNSを切替え、`templates.md` のチェックリストで監視する。旧環境はロールバック期限まで保持する
+5. deployment preview と production は別の証跡として、変更したroute family × localeごとの固定サンプルをreadbackする。canonical URL=200、反対側slash=301+exact `Location`、H1、lang、canonical / `og:url`、OGP/Twitter、OG画像の200・Content-Type・実寸を確認する。オフライン全件検証後のbounded sampleとし、本番を全ページ巡回しない。productionは通常URLの再取得でCDN staleも除外する
+6. 少RAM環境では `BUILD_MEMORY_LIMIT_MB` を設定する。ラッパーが webpack へ切替え、ワーカー数と heap を制約する。Turbopack のネイティブメモリは実質制御不能
+7. カスタムドメイン・SSL・DNSを切替え、`templates.md` のチェックリストで監視する。旧環境はロールバック期限まで保持する
 
 ### 8.5 Web Vitals(デフォルト品質基準)
 
@@ -627,7 +668,7 @@ npm run wpkit -- scorecard --config ../scorecard.config.json
 
 ## 委任・記録の規約
 
-- 実装委任・レビュー・委任ログは delegate スキルの規約に従う(このスキルは何を委任するかの分割と品質ゲートを規定する)
+- 直接実装では実行中のエージェントが全差分のレビューと検証を担う。委任する場合のみ、利用可能な委任スキル・案件の規約に従って担当範囲と記録を定める
 - kit・テンプレート・スキル手順を改訂したら、記録前に `cd kit && npm run e2e`（golden E2E）を実行し、回帰ゼロを確認する
 - kit に案件固有ロジックを入れない。案件差は mapping.config と site/ 側で吸収
 - 案件へピン留めした kit からスキルへ変更を還元するときは、委任先が変更したファイルだけを列挙してコピーする。古いスナップショットを `rsync` で一括同期せず、反映後に `git diff --stat` で対象を照合する

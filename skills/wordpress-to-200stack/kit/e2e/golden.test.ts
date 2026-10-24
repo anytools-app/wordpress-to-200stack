@@ -172,6 +172,8 @@ describe("golden migration E2E (steps 1-8)", () => {
       filter: (source) => !source.split("/").some((part) => ["node_modules", ".next", "out", "_scratch"].includes(part)),
     });
     await symlink(join(templateDir, "node_modules"), join(siteDir, "node_modules"), "dir");
+    await writeFile(join(siteDir, ".env.local"), "NEXT_PUBLIC_SITE_ORIGIN=https://example.test\n");
+    await writeFile(join(siteDir, ".env.test"), "NEXT_PUBLIC_SITE_ORIGIN=https://example.test\n");
     const documentPath = join(siteDir, "src", "lib", "content", "microcms-document.ts");
     const source = await readFile(documentPath, "utf8");
     await writeFile(documentPath, source.replace("export const MICROCMS_APIS: readonly string[] = [];", "export const MICROCMS_APIS: readonly string[] = [\"cars\", \"pages\"];"));
@@ -191,7 +193,7 @@ export const dynamicParams = false;
 type Props = { params: Promise<{ path: string[] }> };
 async function documentFor(path: string[]) { return (await ContentRepository.load()).findByRoute(path); }
 export async function generateStaticParams() { return (await ContentRepository.load()).allRoutes().map((route) => ({ path: route.segments })); }
-export async function generateMetadata({ params }: Props): Promise<Metadata> { const document = await documentFor((await params).path); return document ? { title: document.seo?.title || document.content.title, description: document.seo?.description || document.content.excerpt || undefined, alternates: { canonical: document.route.path }, robots: document.seo?.noindex ? { index: false, follow: false } : undefined } : {}; }
+export async function generateMetadata({ params }: Props): Promise<Metadata> { const document = await documentFor((await params).path); return document ? { title: document.seo?.title || document.content.title, description: document.seo?.description || document.content.excerpt || undefined, alternates: { canonical: document.route.path.endsWith("/") ? document.route.path : \`\${document.route.path}/\` }, robots: document.seo?.noindex ? { index: false, follow: false } : undefined } : {}; }
 export default async function Page({ params }: Props) { const document = await documentFor((await params).path); if (!document) return notFound(); const Template = templateFor(document.api, document.kind); return <Template document={document} />; }
 `);
     await mkdir(join(siteDir, "src", "app", "about"), { recursive: true });
@@ -203,6 +205,26 @@ async function about() { return (await ContentRepository.load()).findByContentId
 export async function generateMetadata(): Promise<Metadata> { const document = await about(); return document ? { title: document.seo?.title || document.content.title, alternates: { canonical: "/about/" } } : {}; }
 export default async function About() { const document = await about(); if (!document) return notFound(); const Template = templateFor(document.api, document.kind); return <Template document={document} />; }
 `);
+    await writeFile(join(siteDir, "src", "app", "sitemap.ts"), `import type { MetadataRoute } from "next";
+import { ContentRepository } from "@/lib/repository";
+export const dynamic = "force-static";
+function siteUrl(): URL { return new URL(process.env.NEXT_PUBLIC_SITE_ORIGIN ?? "http://localhost:3000"); }
+export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
+  const repository = await ContentRepository.load();
+  const cmsRoutes = repository.allRoutes().flatMap((route) => {
+    const document = repository.findByRoute(route.segments);
+    if (!document || document.seo?.noindex) return [];
+    const lastModified = document.source.modifiedGmt || document.content.publishedAt;
+    const path = route.path.endsWith("/") ? route.path : \`\${route.path}/\`;
+    return [{ url: new URL(path, siteUrl()).toString(), ...(lastModified ? { lastModified } : {}) }];
+  });
+  return [
+    { url: new URL("/", siteUrl()).toString() },
+    { url: new URL("/about/", siteUrl()).toString() },
+    ...cmsRoutes,
+  ];
+}
+`);
     const copiedFidelityConfig = JSON.parse(await readFile(join(siteDir, "fidelity-audit.config.json"), "utf8")) as Record<string, unknown>;
     expect(copiedFidelityConfig).toMatchObject({ archiveDirectory: "../_scratch/archive", inventory: "../_scratch/archive/inventory.json", mediaMap: "../_scratch/media-map.json" });
     const fidelityAuditConfig = {
@@ -212,6 +234,30 @@ export default async function About() { const document = await about(); if (!doc
       surfaceRules: [{ id: "golden-document", route: "^/", archive: "body", built: "body" }],
     };
     await writeFile(join(siteDir, "fidelity-audit.config.json"), JSON.stringify(fidelityAuditConfig, null, 2));
+    await writeFile(join(siteDir, "seo-contract.config.json"), JSON.stringify({
+      schemaVersion: 1,
+      status: "approved",
+      urlPolicy: { trailingSlash: true },
+      archiveSitemap: { required: true },
+      routeFamilies: [
+        { id: "home-ja", pattern: "/", locale: "ja", requiredFields: ["title", "canonical", "h1:count", "h1:text"] },
+        { id: "about-ja", pattern: "/about", locale: "ja", requiredFields: ["title", "canonical", "h1:count", "h1:text"] },
+        { id: "cars-ja", pattern: "/cars/**", locale: "ja", requiredFields: ["title", "canonical", "h1:count", "h1:text"] },
+        { id: "pages-ja", pattern: "/pages/**", locale: "ja", requiredFields: ["title", "canonical", "h1:count", "h1:text"] },
+        { id: "cms-preview-ja", pattern: "/preview", locale: "ja", requiredFields: ["title", "canonical", "meta:robots"] },
+      ],
+      retiredRoutes: [],
+    }, null, 2));
+    await writeFile(join(siteDir, "routing-config.jsonc"), JSON.stringify({
+      version: 1,
+      rules: [{
+        id: "normalize-trailing-slash",
+        patternSyntax: "regex",
+        source: "^/(?!404(?:/|$)|_not-found(?:/|$))(?!.*\\.[^/]+$)(.+[^/])$",
+        destination: "/$1/",
+        statusCode: 301,
+      }],
+    }, null, 2));
     for (const args of [["init", "--quiet"], ["add", "."]]) {
       const git = spawnSync("git", args, { cwd: siteDir, encoding: "utf8" });
       expect(git.status, `${git.stdout ?? ""}\n${git.stderr ?? ""}`).toBe(0);
@@ -247,9 +293,12 @@ export default async function About() { const document = await about(); if (!doc
       const builtPath = route === "/" ? join(siteDir, "out", "index.html") : join(siteDir, "out", ...route.slice(1, -1).split("/"), "index.html");
       const archivePage = join(parityArchive, "pages", encodeURIComponent(route), "page.html");
       await mkdir(dirname(archivePage), { recursive: true });
-      await writeFile(archivePage, await readFile(builtPath));
+      const html = await readFile(builtPath, "utf8");
+      await writeFile(archivePage, html);
+      await writeFile(join(dirname(archivePage), "meta.json"), JSON.stringify({ status: 200, url: `https://example.test${route}` }, null, 2));
     }
     await writeFile(join(parityArchive, "inventory.json"), JSON.stringify({ urls: parityRoutes.map((route) => ({ url: `https://example.test${route}`, status: 200 })) }, null, 2));
+    await cp(join(siteDir, "out", "sitemap.xml"), join(parityArchive, "sitemap.xml"));
     await mkdir(join(siteDir, "_scratch", "fidelity"), { recursive: true });
     await writeFile(join(workDir, "_scratch", "media-map.json"), "{}\n");
 
@@ -257,6 +306,113 @@ export default async function About() { const document = await about(); if (!doc
     expect(verification.missing).toEqual([]);
     expect(verification.metaMismatches).toEqual([]);
     expect(verification.brokenLinks).toEqual([]);
+
+    const seo = spawnSync("npm", ["run", "verify:seo"], {
+      cwd: siteDir,
+      encoding: "utf8",
+      env: { ...process.env, NEXT_PUBLIC_SITE_ORIGIN: "https://example.test", WPKIT_ARCHIVE_DIR: parityArchive },
+    });
+    const seoReport = await readFile(join(siteDir, "_scratch", "seo-audit", "report.json"), "utf8").catch(() => "");
+    expect(seo.status, `${seo.stdout ?? ""}\n${seo.stderr ?? ""}\n${seoReport}`).toBe(0);
+    const routes = spawnSync("npm", ["run", "verify:routes"], {
+      cwd: siteDir,
+      encoding: "utf8",
+      env: { ...process.env, NEXT_PUBLIC_SITE_ORIGIN: "https://example.test" },
+    });
+    expect(routes.status, `${routes.stdout ?? ""}\n${routes.stderr ?? ""}`).toBe(0);
+
+    const archiveWithoutSitemap = join(workDir, "_scratch", "archive-without-sitemap");
+    await mkdir(archiveWithoutSitemap, { recursive: true });
+    const missingSitemapSeo = spawnSync("npm", ["run", "verify:seo"], {
+      cwd: siteDir,
+      encoding: "utf8",
+      env: { ...process.env, NEXT_PUBLIC_SITE_ORIGIN: "https://example.test", WPKIT_ARCHIVE_DIR: archiveWithoutSitemap },
+    });
+    expect(missingSitemapSeo.status).toBe(1);
+    const missingSitemapReport = JSON.parse(await readFile(join(siteDir, "_scratch", "seo-audit", "report.json"), "utf8")) as { nonIntentionalDifferences: Array<{ item: string }> };
+    expect(missingSitemapReport.nonIntentionalDifferences.map((difference) => difference.item)).toContain("archiveSitemap.notFound");
+
+    const aboutOutput = join(siteDir, "out", "about", "index.html");
+    const originalAboutOutput = await readFile(aboutOutput, "utf8");
+    const canonicalMutation = originalAboutOutput.replace("https://example.test/about/", "https://example.test/about");
+    expect(canonicalMutation).not.toBe(originalAboutOutput);
+    await writeFile(aboutOutput, canonicalMutation);
+    try {
+      const mutatedSeo = spawnSync("npm", ["run", "verify:seo"], {
+        cwd: siteDir,
+        encoding: "utf8",
+        env: { ...process.env, NEXT_PUBLIC_SITE_ORIGIN: "https://example.test", WPKIT_ARCHIVE_DIR: parityArchive },
+      });
+      expect(mutatedSeo.status).toBe(1);
+      const mutatedSeoReport = JSON.parse(await readFile(join(siteDir, "_scratch", "seo-audit", "report.json"), "utf8")) as { nonIntentionalDifferences: Array<{ item: string }> };
+      expect(mutatedSeoReport.nonIntentionalDifferences.map((difference) => difference.item)).toContain("canonical.publicPath");
+      const mutatedRoutes = spawnSync("npm", ["run", "verify:routes"], {
+        cwd: siteDir,
+        encoding: "utf8",
+        env: { ...process.env, NEXT_PUBLIC_SITE_ORIGIN: "https://example.test" },
+      });
+      expect(mutatedRoutes.status).toBe(1);
+      expect(`${mutatedRoutes.stdout ?? ""}\n${mutatedRoutes.stderr ?? ""}`).toContain("canonicalMismatches");
+    } finally {
+      await writeFile(aboutOutput, originalAboutOutput);
+    }
+
+    const originMutation = originalAboutOutput.replace("https://example.test/about/", "https://wrong.example/about/");
+    expect(originMutation).not.toBe(originalAboutOutput);
+    await writeFile(aboutOutput, originMutation);
+    try {
+      const mutatedSeo = spawnSync("npm", ["run", "verify:seo"], {
+        cwd: siteDir,
+        encoding: "utf8",
+        env: { ...process.env, NEXT_PUBLIC_SITE_ORIGIN: "https://example.test", WPKIT_ARCHIVE_DIR: parityArchive },
+      });
+      expect(mutatedSeo.status).toBe(1);
+      const mutatedSeoReport = JSON.parse(await readFile(join(siteDir, "_scratch", "seo-audit", "report.json"), "utf8")) as { nonIntentionalDifferences: Array<{ item: string }> };
+      expect(mutatedSeoReport.nonIntentionalDifferences.map((difference) => difference.item)).toContain("canonical.absoluteOrigin");
+      const mutatedRoutes = spawnSync("npm", ["run", "verify:routes"], {
+        cwd: siteDir,
+        encoding: "utf8",
+        env: { ...process.env, NEXT_PUBLIC_SITE_ORIGIN: "https://example.test" },
+      });
+      expect(mutatedRoutes.status).toBe(1);
+      expect(`${mutatedRoutes.stdout ?? ""}\n${mutatedRoutes.stderr ?? ""}`).toContain("origin");
+    } finally {
+      await writeFile(aboutOutput, originalAboutOutput);
+    }
+
+    const canonicalTag = originalAboutOutput.match(/<link\b(?=[^>]*\brel="canonical")[^>]*>/i)?.[0];
+    expect(canonicalTag).toBeDefined();
+    const missingCanonicalMutation = originalAboutOutput.replace(canonicalTag!, "");
+    await writeFile(aboutOutput, missingCanonicalMutation);
+    try {
+      const mutatedRoutes = spawnSync("npm", ["run", "verify:routes"], {
+        cwd: siteDir,
+        encoding: "utf8",
+        env: { ...process.env, NEXT_PUBLIC_SITE_ORIGIN: "https://example.test" },
+      });
+      expect(mutatedRoutes.status).toBe(1);
+      expect(`${mutatedRoutes.stdout ?? ""}\n${mutatedRoutes.stderr ?? ""}`).toContain("missing");
+    } finally {
+      await writeFile(aboutOutput, originalAboutOutput);
+    }
+
+    const queryMutation = originalAboutOutput.replace(
+      "https://example.test/about/",
+      "https://example.test/about/?utm_source=invalid-canonical",
+    );
+    expect(queryMutation).not.toBe(originalAboutOutput);
+    await writeFile(aboutOutput, queryMutation);
+    try {
+      const mutatedRoutes = spawnSync("npm", ["run", "verify:routes"], {
+        cwd: siteDir,
+        encoding: "utf8",
+        env: { ...process.env, NEXT_PUBLIC_SITE_ORIGIN: "https://example.test" },
+      });
+      expect(mutatedRoutes.status).toBe(1);
+      expect(`${mutatedRoutes.stdout ?? ""}\n${mutatedRoutes.stderr ?? ""}`).toContain("public-path");
+    } finally {
+      await writeFile(aboutOutput, originalAboutOutput);
+    }
 
     await Promise.all([
       cp(join(fixtures, "golden-scorecard.config.json"), join(workDir, "scorecard.config.json")),

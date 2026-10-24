@@ -1,0 +1,51 @@
+{
+  "schemaVersion": 1,
+  "status": "draft",
+  "urlPolicy": {
+    "trailingSlash": true
+  },
+  "archiveSitemap": {
+    "required": true
+  },
+  "routeFamilies": [
+    {
+      "id": "TODO-route-family",
+      "pattern": "/**",
+      "locale": "TODO-locale",
+      "requiredFields": [
+        "title",
+        "meta:description",
+        "canonical",
+        "og:title",
+        "og:description",
+        "og:url",
+        "og:image",
+        "og:image:secure_url",
+        "og:image:type",
+        "og:image:width",
+        "og:image:height",
+        "og:image:alt",
+        "twitter:card",
+        "twitter:title",
+        "twitter:description",
+        "twitter:image",
+        "twitter:image:alt",
+        "h1:count",
+        "h1:text"
+      ],
+      "expectedValues": {},
+      "equalFields": [
+        ["og:image", "og:image:secure_url", "twitter:image"],
+        ["og:image:alt", "twitter:image:alt"]
+      ],
+      "socialImage": {
+        "requiresProvenance": true,
+        "source": "",
+        "provenanceRef": "",
+        "contrastiveSamples": [],
+        "singleCandidateReason": ""
+      }
+    }
+  ],
+  "retiredRoutes": []
+}

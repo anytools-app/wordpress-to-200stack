@@ -1,0 +1,7 @@
+node_modules/
+.astro/
+out/
+_scratch/
+.env
+.env.*
+!.env.example

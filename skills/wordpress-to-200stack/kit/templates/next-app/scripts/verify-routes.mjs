@@ -1,13 +1,27 @@
 import { readdir, readFile } from "node:fs/promises";
 import { join, relative, resolve, sep } from "node:path";
 
-const project = resolve(import.meta.dirname, "..");
-const outDirectory = resolve(project, process.env.VERIFY_OUT_DIR ?? "out");
+import nextEnv from "@next/env";
+import { expectedPublicPathForLookup, normalizeLookupPath, trailingSlashFor } from "./lib/seo-contract.mjs";
 
-function normalizePath(value) {
-  const path = String(value || "/").split(/[?#]/, 1)[0];
-  const withSlash = path.startsWith("/") ? path : `/${path}`;
-  return withSlash === "/" ? "/" : `${withSlash.replace(/\/+$/, "")}/`;
+const project = resolve(import.meta.dirname, "..");
+const { loadEnvConfig } = nextEnv;
+loadEnvConfig(project);
+const outDirectory = resolve(project, process.env.VERIFY_OUT_DIR ?? "out");
+const siteOrigin = process.env.NEXT_PUBLIC_SITE_ORIGIN ?? "https://example.invalid";
+const expectedOrigin = new URL(siteOrigin).origin;
+
+function rawPathname(value) {
+  try {
+    return new URL(String(value || "/"), siteOrigin).pathname;
+  } catch {
+    const path = String(value || "/").split(/[?#]/, 1)[0];
+    return path.startsWith("/") ? path : `/${path}`;
+  }
+}
+
+function outputRoute(value, trailingSlash) {
+  return expectedPublicPathForLookup(normalizeLookupPath(value), trailingSlash);
 }
 
 function stripJsonComments(source) {
@@ -21,10 +35,10 @@ function stripJsonComments(source) {
       result += char;
       if (escaped) escaped = false;
       else if (char === "\\") escaped = true;
-      else if (char === "\"") inString = false;
+      else if (char === '"') inString = false;
       continue;
     }
-    if (char === "\"") {
+    if (char === '"') {
       inString = true;
       result += char;
       continue;
@@ -58,10 +72,10 @@ function removeTrailingCommas(source) {
       result += char;
       if (escaped) escaped = false;
       else if (char === "\\") escaped = true;
-      else if (char === "\"") inString = false;
+      else if (char === '"') inString = false;
       continue;
     }
-    if (char === "\"") {
+    if (char === '"') {
       inString = true;
       result += char;
       continue;
@@ -81,35 +95,40 @@ function parseJsonc(source) {
 }
 
 function attribute(tag, name) {
-  const match = tag.match(
-    new RegExp(`\\b${name}\\s*=\\s*(?:"([^"]*)"|'([^']*)'|([^\\s>]+))`, "i"),
-  );
+  const match = tag.match(new RegExp(`\\b${name}\\s*=\\s*(?:"([^"]*)"|'([^']*)'|([^\\s>]+))`, "i"));
   return match?.[1] ?? match?.[2] ?? match?.[3];
 }
 
-function canonicalPath(html, route) {
+function canonicalValue(html) {
   for (const tag of html.match(/<link\b[^>]*>/gi) ?? []) {
     if (!attribute(tag, "rel")?.split(/\s+/).includes("canonical")) continue;
     const href = attribute(tag, "href");
-    if (!href) break;
+    if (!href) return { href, invalid: true };
     try {
-      return normalizePath(new URL(href, "https://example.invalid").pathname);
+      const url = new URL(href, siteOrigin);
+      return {
+        href,
+        absolute: /^https?:\/\//i.test(href),
+        origin: url.origin,
+        publicPath: `${url.pathname}${url.search}${url.hash}`,
+        resolved: url.href,
+      };
     } catch {
-      break;
+      return { href, invalid: true };
     }
   }
-  return route;
+  return undefined;
 }
 
-async function outputRoutes(directory, values = []) {
+async function outputRoutes(directory, trailingSlash, values = []) {
   for (const entry of await readdir(directory, { withFileTypes: true })) {
     const path = join(directory, entry.name);
-    if (entry.isDirectory()) await outputRoutes(path, values);
+    if (entry.isDirectory()) await outputRoutes(path, trailingSlash, values);
     else if (entry.name === "index.html") {
       const directoryName = relative(outDirectory, resolve(path, ".."));
-      const route = normalizePath(directoryName ? `/${directoryName.split(sep).join("/")}` : "/");
+      const route = outputRoute(directoryName ? `/${directoryName.split(sep).join("/")}` : "/", trailingSlash);
       const html = await readFile(path, "utf8");
-      values.push({ route, canonical: canonicalPath(html, route) });
+      values.push({ route, canonical: canonicalValue(html) });
     }
   }
   return values;
@@ -118,50 +137,88 @@ async function outputRoutes(directory, values = []) {
 function destinationFor(rule, pathname) {
   if (rule.patternSyntax === "regex") {
     const match = new RegExp(rule.source).exec(pathname);
-    return match
-      ? rule.destination.replace(/\$(\d+)/g, (_all, index) => match[Number(index)] ?? "")
-      : undefined;
+    return match ? rule.destination.replace(/\$(\d+)/g, (_all, index) => match[Number(index)] ?? "") : undefined;
   }
-  return normalizePath(rule.source) === pathname ? rule.destination : undefined;
+  return rawPathname(rule.source) === pathname ? rule.destination : undefined;
 }
 
-const [legacyRoutes, routingConfig, emitted] = await Promise.all([
+function statusFor(rule) {
+  return rule.statusCode ?? rule.status;
+}
+
+const [legacyRoutes, routingConfig, seoContract] = await Promise.all([
   readFile(join(project, "src", "data", "legacy-routes.json"), "utf8").then(JSON.parse),
   readFile(join(project, "routing-config.jsonc"), "utf8").then(parseJsonc),
-  outputRoutes(outDirectory),
+  readFile(join(project, "seo-contract.config.json"), "utf8").then(JSON.parse),
 ]);
+const trailingSlash = trailingSlashFor(seoContract);
+const emitted = await outputRoutes(outDirectory, trailingSlash);
 const output = new Set(emitted.map(({ route }) => route));
 const duplicateOutputPaths = emitted
   .map(({ route }) => route)
   .filter((route, index, routes) => routes.indexOf(route) !== index);
 const unreachable = legacyRoutes.flatMap((entry) => {
-  const oldPath = normalizePath(entry.path);
+  const oldPath = rawPathname(entry.path);
   if (output.has(oldPath)) return [];
-  const destination = routingConfig.rules
-    .map((rule) => destinationFor(rule, oldPath))
-    .find(Boolean);
-  return destination && output.has(normalizePath(destination))
+  const matchingRule = routingConfig.rules.find((rule) => destinationFor(rule, oldPath) !== undefined);
+  const destination = matchingRule ? destinationFor(matchingRule, oldPath) : undefined;
+  return destination && statusFor(matchingRule) === 301 && output.has(rawPathname(destination))
     ? []
-    : [{ oldPath, destination: destination && normalizePath(destination) }];
+    : [
+        {
+          oldPath,
+          destination: destination && rawPathname(destination),
+          status: matchingRule && statusFor(matchingRule),
+        },
+      ];
 });
-const ruleSourceKeys = routingConfig.rules.map((rule) =>
-  `${rule.patternSyntax ?? "exact"}:${
-    rule.patternSyntax === "regex" ? rule.source : normalizePath(rule.source)
-  }`,
+const ruleSourceKeys = routingConfig.rules.map(
+  (rule) =>
+    `${rule.patternSyntax ?? "exact"}:${rule.patternSyntax === "regex" ? rule.source : rawPathname(rule.source)}`,
 );
-const duplicateRuleSources = ruleSourceKeys.filter(
-  (source, index) => ruleSourceKeys.indexOf(source) !== index,
-);
+const duplicateRuleSources = ruleSourceKeys.filter((source, index) => ruleSourceKeys.indexOf(source) !== index);
 const routesByCanonical = new Map();
 for (const { route, canonical } of emitted) {
-  routesByCanonical.set(canonical, [...(routesByCanonical.get(canonical) ?? []), route]);
+  if (!canonical?.resolved) continue;
+  routesByCanonical.set(canonical.resolved, [...(routesByCanonical.get(canonical.resolved) ?? []), route]);
 }
 const canonicalCollisions = [...routesByCanonical.entries()]
   .filter(([, routes]) => new Set(routes).size > 1)
   .map(([canonical, routes]) => ({ canonical, routes: [...new Set(routes)].sort() }));
-const non301Rules = routingConfig.rules
-  .filter((rule) => rule.statusCode !== 301)
-  .map((rule) => rule.id ?? rule.source);
+const errorRoutes = new Set([outputRoute("/404", trailingSlash), outputRoute("/_not-found", trailingSlash)]);
+const canonicalMismatches = emitted.flatMap(({ route, canonical }) => {
+  if (errorRoutes.has(route)) return [];
+  const reasons = [];
+  if (!canonical) reasons.push("missing");
+  else {
+    if (canonical.invalid) reasons.push("invalid");
+    if (!canonical.absolute) reasons.push("not-absolute");
+    if (canonical.origin !== expectedOrigin) reasons.push("origin");
+    if (canonical.publicPath !== route) reasons.push("public-path");
+  }
+  return reasons.length ? [{ route, canonical, expected: { origin: expectedOrigin, publicPath: route }, reasons }] : [];
+});
+const non301Rules = routingConfig.rules.filter((rule) => statusFor(rule) !== 301).map((rule) => rule.id ?? rule.source);
+const normalizationRedirectErrors = emitted.flatMap(({ route }) => {
+  if (route === "/" || errorRoutes.has(route)) return [];
+  const source = trailingSlash ? route.replace(/\/$/, "") : `${route}/`;
+  const rule = routingConfig.rules.find((candidate) => destinationFor(candidate, source) !== undefined);
+  if (!rule) return [{ route, source, reason: "missing-redirect" }];
+  const destination = destinationFor(rule, source);
+  if (statusFor(rule) !== 301)
+    return [{ route, source, rule: rule.id ?? rule.source, reason: "status", actual: statusFor(rule) }];
+  if (rawPathname(destination) !== route) {
+    return [{ route, source, rule: rule.id ?? rule.source, reason: "destination", actual: rawPathname(destination) }];
+  }
+  if (destinationFor(rule, route) !== undefined) {
+    return [{ route, source, rule: rule.id ?? rule.source, reason: "canonical-loop" }];
+  }
+  return [];
+});
+const urlPolicyErrors =
+  typeof seoContract?.urlPolicy?.trailingSlash === "boolean"
+    ? []
+    : [{ item: "urlPolicy.trailingSlash", message: "seo-contract.config.json must declare a boolean" }];
 
 const result = {
   legacyRoutes: legacyRoutes.length,
@@ -170,6 +227,9 @@ const result = {
   duplicateOutputPaths: [...new Set(duplicateOutputPaths)],
   duplicateRuleSources: [...new Set(duplicateRuleSources)],
   canonicalCollisions,
+  canonicalMismatches,
+  normalizationRedirectErrors,
+  urlPolicyErrors,
   non301Rules,
 };
 console.log(JSON.stringify(result, null, 2));
@@ -178,5 +238,10 @@ if (
   duplicateOutputPaths.length ||
   duplicateRuleSources.length ||
   canonicalCollisions.length ||
+  canonicalMismatches.length ||
+  normalizationRedirectErrors.length ||
+  urlPolicyErrors.length ||
   non301Rules.length
-) process.exitCode = 1;
+) {
+  process.exitCode = 1;
+}

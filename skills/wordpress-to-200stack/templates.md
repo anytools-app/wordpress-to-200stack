@@ -1,5 +1,7 @@
 # wp-migrate テンプレート集
 
+実装指示書には採用する `next` / `astro` を明記する。以下のNext.jsパス・metadata・CSS Module例は、Astroの場合 `references/frameworks.md` の対応表に従い `.astro` / layout props / scoped styleへ置き換える。完了条件と移植チェックリストは共通。
+
 ## mapping.config.ts の書式(実例は `kit/e2e/fixtures/golden-mapping.config.ts`)
 
 ```ts
@@ -47,13 +49,13 @@ export default defineMigration({
 - [ ] 同名 meta の複数出現: 単独キーなら stringArray、複数キーの組なら repeater
 - [ ] リピータの columns は SCF 定義(`_scratch/analysis/scf-definitions.json`)の repeat グループと一致させる
 
-## テンプレ実装指示書の雛形(delegate で Codex へ)
+## テンプレ実装指示書の雛形(直接実装・委任共通)
 
 ```markdown
 # 実装指示書: <テンプレ名>(例: 記事詳細)
 
 ## 目的
-site/ の Next.js(静的エクスポート)に <route パターン> の表示テンプレートを実装する。
+site/ の採用フレームワーク(Next.js / Astroの静的出力)に <route パターン> の表示テンプレートを実装する。
 デザインは現行サイトの忠実再現。完了条件はピクセル比較の収束 + 機能一致(フォーム・リンク・メタ)。
 凍結済みの基準データを正とする:
 - スクショ: _scratch/archive/pages/<page>/desktop.png / mobile.png
@@ -72,10 +74,10 @@ site/ の Next.js(静的エクスポート)に <route パターン> の表示テ
 - **繰り返しブロックを固定配列に焼き込まない**。原文が`WP_Query`で引いていたものはrepository経由にする
 - CSS所有権の意思決定木に従う: 単一サーフェス固有→そのCSS Module、共有クラスタ→`src/styles/`の共有Module、
   要素リセット・基本フォント→globals-reset、横断utility→専用ファイル。1ルール=1所有ファイル
-- 内部リンクは`SiteLink`を使い、hrefはルート台帳の**新パス**にする(旧URLは301の入口であって行き先ではない)。素の`<a>`は外部・別タブだけ
+- 内部リンクは`SiteLink`を使い、hrefはルート台帳の**新パス**にする(旧URLは301の入口であって行き先ではない)。Next.jsの素の`<a>`は外部・別タブだけ。AstroのSiteLinkは通常の`<a>`を出力する
 - 新規UIのカルーセルは`aria-hidden`+`inert`、アイコンのみのリンクは`aria-label`を使う。archive由来の既存UIはalt/全aria/title/placeholder/value/role/hiddenを原文保持し、変更はobservation hash decisionを必須にする
 - 旧テーマCSS・原文CSS・ページ単位stylesheet読込を持ち込まない
-- jQueryプラグイン(imgLiquid / slick / lity)の見た目はCSS + Reactで代替する(scroll-snap等)
+- jQueryプラグイン(imgLiquid / slick / lity)の見た目はCSS + フレームワーク標準のJS/コンポーネントで代替する(scroll-snap等)
 - フォームはformrunのaction・input nameを原文と完全一致させる。SDK埋め込み型は同一form IDのembed div
 - 原文のDOM順・視覚順を尊重する。構造の完全一致は要求しない
 
@@ -84,6 +86,7 @@ site/ の Next.js(静的エクスポート)に <route パターン> の表示テ
 - <代表 URL 2〜3件> についてdesktop/mobileの原文比較を行い、ピクセル差分を収束させること
 - measure-blocks の必須ブロックで dy=0 / dh=0 を確認すること(desktop / mobile 両 viewport。例外は fidelity-approvals 台帳に登録した意図的差分のみ)
 - フォームaction/name、内部/外部リンク、title/canonical/OGP/robotsを原文・台帳と照合すること
+- 代表URLは視覚確認だけの範囲。SEO/URLは `seo-contract.config.json` と `verify:seo` / `verify:routes` で同じroute family・localeの全出力routeを検証すること
 - `npm run verify:archive-built` でfull document + tracked surface、common chrome、surface外画像、静的DOMテキスト、静的属性、JSON-LD値の未裁定observationが0であること
 - DOMタグ実体数カウントは構造差の診断に使ってよいが、完了条件にしない(substringはRSCペイロードで2倍に見える)
 - CSS・レイアウト変更は`css-visual-diff.mjs`のbefore/after capture→compareで退行0を確認すること
@@ -114,15 +117,16 @@ site/ の Next.js(静的エクスポート)に <route パターン> の表示テ
 - [ ] 入場アニメ初期状態: 初回ペイント前に確定(SSR可視→hydrationで隠す、をしない)
 - [ ] 埋め込みの最小幅: 原文の min-width(地図等の縮退閾値)をそのまま移す
 - [ ] head/リンク方針: favicon・RSS・OGP補助値・tel:・target=_blank の扱いは案件方針表に従う
+- [ ] SEO契約: この単位の route family / locale / H1 / canonical / OGP / Twitter / sitemap掲載有無を `seo-contract.config.json` に反映し、social imageは原文由来とcontrastive sample(または単一候補理由)を記録する
 ```
 
-## 固定ページ実装指示書の雛形(delegate で Codex へ)
+## 固定ページ実装指示書の雛形(直接実装・委任共通)
 
 ```markdown
 # 実装指示書: 固定ページ <route>
 
 ## 目的
-固定ページを microCMS やアーカイブ HTML の再掲ではなく、App Router の通常ページとして書き起こす。
+固定ページを microCMS やアーカイブ HTML の再掲ではなく、採用フレームワークの通常ページとして書き起こす。
 完了条件はピクセル比較の収束 + 機能一致(フォーム・リンク・メタ)。
 参照素材:
 - スクショ: _scratch/archive/pages/<page>/desktop.png / mobile.png
@@ -133,7 +137,7 @@ site/ の Next.js(静的エクスポート)に <route パターン> の表示テ
 - `site/src/app/<route>/page.tsx`、`page.module.css`、ページ固有の `metadata` を実装する
 - CSS所有権の意思決定木に従う。固定ページ固有ルールは`page.module.css`、共有クラスタだけを`src/styles/`の共有Moduleへ置く。値を二重定義しない
 - 内部リンクは`SiteLink`を使う。旧テーマCSS・原文CSSを持ち込まない
-- jQueryプラグインの見た目はCSS + Reactで代替する
+- jQueryプラグインの見た目はCSS + フレームワーク標準のJS/コンポーネントで代替する
 - フォームはformrunのaction・input nameを原文と完全一致させる。SDK埋め込み型は同一form IDのembed div
 - 原文のDOM順・視覚順を尊重するが、構造の完全一致は要求しない
 - 画像は 1x/2x の `srcset` または同等のレスポンシブ指定を持たせ、未回収の `@2x` は fetch-once キャッシュ経由で補完する
@@ -144,6 +148,7 @@ site/ の Next.js(静的エクスポート)に <route パターン> の表示テ
 - desktop/mobileの実装スクショを原文スクショと並べ、差分発見→修正→再比較を収束まで繰り返す
 - measure-blocks の必須ブロックで dy=0 / dh=0 を確認する(desktop / mobile 両 viewport。例外は fidelity-approvals 台帳に登録した意図的差分のみ)
 - フォームaction/name、内部/外部リンク、title/canonical/OGP/robotsを照合する
+- 代表URLは視覚確認だけの範囲。SEO/URLは `seo-contract.config.json` と `verify:seo` / `verify:routes` で同じroute family・localeの全出力routeを検証する
 - DOMタグ実体数カウントは診断に使ってよいが、完了条件にしない
 - CSS・レイアウト変更はpixel-gateのbefore/after比較で退行0を確認する
 - 動き系の変更がある場合は `scenarios.config.json` に対象シナリオを追加し、`live-scenarios` を実行する
@@ -166,6 +171,8 @@ site/ の Next.js(静的エクスポート)に <route パターン> の表示テ
 - [ ] verify(スクショ込み)エラー0・差分トリアージ済み(`verify` gate)
 - [ ] scorecard 総合 PASS(`verify` gate、`scorecard.md` を issue に添付)
 - [ ] `routing-config.jsonc`が旧URLを新routeまたは301で全カバーし、`out/`との重複0
+- [ ] `seo-contract.config.json` が `approved` で、旧sitemap保存済み(取得不能時は承認済みwaiver)かつ、全出力routeについて `verify:seo` / `verify:routes` が H1・lang・canonical/og:url/sitemap/internal hrefの生URL・OGP/Twitter画像・旧sitemap消失route分類・反対側slashの301を検証済み
+- [ ] deployment preview / 本番のreadbackを別証跡で確認。全ページ巡回ではなく、変更した route family × locale ごとの固定サンプルで canonical URL=200、反対側slash=301、H1、metadata、OG画像応答、CDN staleなしを確認
 - [ ] formrunのaction・input nameを承認済みfixtureと照合
 - [ ] microCMS webhook → ビルドフック接続確認(テスト更新→自動デプロイ)
 - [ ] 本番 DNS 切替 → 404/フォーム/画像の監視(`publish` を承認)

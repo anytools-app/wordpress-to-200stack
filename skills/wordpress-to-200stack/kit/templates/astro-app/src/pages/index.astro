@@ -1,0 +1,17 @@
+---
+import SiteLayout from "../layouts/SiteLayout.astro";
+import SiteLink from "../components/SiteLink.astro";
+import { ContentRepository } from "../lib/repository";
+const repository = await ContentRepository.load();
+---
+<SiteLayout title="Site" canonical="/">
+  <main>
+    <h1>Site</h1>
+    {repository.latestByApi().map(({ api, documents }) => (
+      <section>
+        <h2>{api}</h2>
+        <ul>{documents.map((document) => <li><SiteLink href={document.route.path}>{document.content.title}</SiteLink></li>)}</ul>
+      </section>
+    ))}
+  </main>
+</SiteLayout>

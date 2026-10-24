@@ -3,6 +3,25 @@ import { join, relative, resolve, sep } from "node:path";
 
 import nextEnv from "@next/env";
 import { parseHTML } from "linkedom";
+import {
+  archiveSitemapMissingErrors,
+  collectEqualityErrors,
+  collectExpectedValueErrors,
+  collectInternalHrefErrors,
+  collectRequiredFieldErrors,
+  collectRetiredRouteErrors,
+  collectRouteFamilyCoverageErrors,
+  collectSocialImageEvidenceErrors,
+  collectSocialMetadataFormatErrors,
+  exactTrailingSlashErrors,
+  expectedPublicPathForLookup,
+  intentionalDiffMatches,
+  normalizeLookupPath,
+  publicPath,
+  trailingSlashFor,
+  validateContractConfig,
+  validateIntentionalDiffRegistry,
+} from "./lib/seo-contract.mjs";
 
 const { loadEnvConfig } = nextEnv;
 loadEnvConfig(process.cwd());
@@ -12,24 +31,27 @@ const outDirectory = resolve(project, process.env.SEO_OUT_DIR ?? "out");
 const archiveDirectory = resolve(project, process.env.WPKIT_ARCHIVE_DIR ?? join("_scratch", "archive-full"));
 const reportDirectory = resolve(project, "_scratch", "seo-audit");
 const intentionalDiffsPath = resolve(project, "docs", "seo-intentional-diffs.json");
+const contractConfigPath = resolve(project, "seo-contract.config.json");
 const siteUrl = new URL(process.env.NEXT_PUBLIC_SITE_ORIGIN ?? "https://www.example.com" /* TODO(案件) */);
-const OG_ITEMS = ["title", "description", "url", "image", "type", "site_name", "locale"];
+const OG_ITEMS = [
+  "title",
+  "description",
+  "url",
+  "image",
+  "image:secure_url",
+  "image:type",
+  "image:width",
+  "image:height",
+  "image:alt",
+  "type",
+  "site_name",
+  "locale",
+];
 const ERROR_ROUTES = new Set(["/404", "/_not-found"]);
-
-function normalizePath(value) {
-  let decoded = value;
-  try {
-    decoded = decodeURIComponent(value);
-  } catch {
-    // 壊れた percent encoding は比較レポートに原文のまま残す。
-  }
-  const withSlash = decoded.startsWith("/") ? decoded : `/${decoded}`;
-  return withSlash === "/" ? withSlash : withSlash.replace(/\/+$/, "");
-}
 
 function routeFromHtmlPath(path) {
   const directory = relative(outDirectory, resolve(path, ".."));
-  return directory ? normalizePath(`/${directory.split(sep).join("/")}`) : "/";
+  return directory ? normalizeLookupPath(`/${directory.split(sep).join("/")}`) : "/";
 }
 
 async function findIndexHtml(directory) {
@@ -81,6 +103,8 @@ function jsonLdOf(document) {
 function metadataOf(html) {
   const { document } = parseHTML(html);
   const values = {};
+  const lang = document.documentElement?.getAttribute("lang");
+  if (lang) values["html:lang"] = lang;
   const title = firstContent(document, "title", "text")?.trim();
   if (title) values.title = title;
   for (const name of ["description", "robots"]) {
@@ -98,13 +122,20 @@ function metadataOf(html) {
     const value = element.getAttribute("content");
     if (name && value !== null) values[name] = value;
   }
-  return { values, jsonLd: jsonLdOf(document) };
+  const h1Elements = [...document.querySelectorAll("h1")];
+  const h1Texts = h1Elements.map((element) => element.textContent.trim().replace(/\s+/g, " "));
+  values["h1:count"] = String(h1Elements.length);
+  if (h1Texts.some(Boolean)) values["h1:text"] = h1Texts.join(" | ");
+  const hrefs = [...document.querySelectorAll("a[href]")]
+    .map((element) => element.getAttribute("href"))
+    .filter((href) => typeof href === "string" && href.length > 0);
+  return { values, jsonLd: jsonLdOf(document), hrefs };
 }
 
 function urlComparisonValue(value, movedTo) {
   try {
     const url = new URL(value, "https://www.example.com");
-    const path = movedTo ?? normalizePath(url.pathname);
+    const path = movedTo ?? normalizeLookupPath(url.pathname);
     return `${path}${url.search}${url.hash}`;
   } catch {
     return value;
@@ -128,13 +159,17 @@ function absoluteOriginError(item, value) {
   }
 }
 
-function pathMatches(pattern, path) {
-  if (pattern.endsWith("/**")) return path === pattern.slice(0, -3) || path.startsWith(`${pattern.slice(0, -3)}/`);
-  return pattern === path;
+function publicUrlErrors(path, metadata) {
+  return ["canonical", "og:url"].flatMap((item) => {
+    const value = metadata.values[item];
+    if (value === undefined) return [];
+    const message = absoluteOriginError(item, value);
+    return message ? [{ path, item: `${item}.absoluteOrigin`, expected: siteUrl.origin, actual: value, message }] : [];
+  });
 }
 
 function isIntentional(entries, difference) {
-  return entries.some((entry) => pathMatches(entry.path, difference.path) && entry.item === difference.item);
+  return Array.isArray(entries) && entries.some((entry) => intentionalDiffMatches(entry, difference));
 }
 
 async function readJson(path) {
@@ -143,7 +178,13 @@ async function readJson(path) {
 
 async function loadAliases() {
   try {
-    return (await readJson(join(project, "src", "data", "legacy-route-aliases.json"))) ?? {};
+    const raw = await readJson(join(project, "src", "data", "legacy-route-aliases.json"));
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
+    return Object.fromEntries(
+      Object.entries(raw).flatMap(([currentPath, legacyPath]) =>
+        typeof legacyPath === "string" ? [[normalizeLookupPath(currentPath), normalizeLookupPath(legacyPath)]] : [],
+      ),
+    );
   } catch {
     return {};
   }
@@ -152,7 +193,14 @@ async function loadAliases() {
 async function loadArchivePages() {
   const pages = new Map();
   const directory = join(archiveDirectory, "pages");
-  for (const entry of await readdir(directory, { withFileTypes: true })) {
+  let entries = [];
+  try {
+    entries = await readdir(directory, { withFileTypes: true });
+  } catch (error) {
+    if (error?.code !== "ENOENT") throw error;
+    return pages;
+  }
+  for (const entry of entries) {
     if (!entry.isDirectory()) continue;
     const pageDirectory = join(directory, entry.name);
     try {
@@ -160,7 +208,10 @@ async function loadArchivePages() {
       if (metadata.status !== 200) continue;
       const url = metadata.url ?? metadata.finalUrl ?? metadata.canonical;
       if (!url) continue;
-      pages.set(normalizePath(new URL(url, "https://www.example.com").pathname), join(pageDirectory, "page.html"));
+      pages.set(
+        normalizeLookupPath(new URL(url, "https://www.example.com").pathname),
+        join(pageDirectory, "page.html"),
+      );
     } catch (error) {
       if (error?.code !== "ENOENT") throw error;
     }
@@ -169,7 +220,7 @@ async function loadArchivePages() {
 }
 
 async function archiveHtml(pages, path) {
-  const pagePath = pages.get(normalizePath(path));
+  const pagePath = pages.get(normalizeLookupPath(path));
   return pagePath ? readFile(pagePath, "utf8") : undefined;
 }
 
@@ -185,14 +236,17 @@ function differenceCounts(differences) {
 }
 
 function sitemapLocations(xml) {
-  return [...xml.matchAll(/<loc>([\s\S]*?)<\/loc>/gi)].map((match) => match[1].trim().replaceAll("&amp;", "&"));
+  return [...xml.matchAll(/<url\b[^>]*>([\s\S]*?)<\/url>/gi)].flatMap((urlMatch) => {
+    const location = urlMatch[1].match(/<loc\b[^>]*>([\s\S]*?)<\/loc>/i)?.[1];
+    return location ? [location.trim().replaceAll("&amp;", "&")] : [];
+  });
 }
 
 function canonicalPath(metadata) {
   const value = metadata.values.canonical;
   if (!value) return undefined;
   try {
-    return normalizePath(new URL(value, siteUrl).pathname);
+    return normalizeLookupPath(new URL(value, siteUrl).pathname);
   } catch {
     return undefined;
   }
@@ -204,7 +258,14 @@ function robotsNoindex(metadata) {
 
 async function findXmlFiles(directory) {
   const files = [];
-  for (const entry of await readdir(directory, { withFileTypes: true })) {
+  let entries = [];
+  try {
+    entries = await readdir(directory, { withFileTypes: true });
+  } catch (error) {
+    if (error?.code !== "ENOENT") throw error;
+    return files;
+  }
+  for (const entry of entries) {
     const path = join(directory, entry.name);
     if (entry.isDirectory()) files.push(...(await findXmlFiles(path)));
     else if (/sitemap.*\.xml$/i.test(entry.name)) files.push(path);
@@ -222,6 +283,7 @@ function markdownReport(report) {
     `- 非意図差分: ${report.summary.nonIntentional}`,
     `- 意図差分: ${report.summary.intentional}`,
     `- 新規追加フィールド: ${report.summary.additions}`,
+    `- 契約エラー: ${report.summary.contractErrors}`,
     "",
     "## 項目別 mismatch",
     "",
@@ -247,8 +309,9 @@ function markdownReport(report) {
     `- origin 違反: ${report.sitemap.originErrors.length}`,
     `- moved URL 違反: ${report.sitemap.movedErrors.length}`,
     `- preview: sitemap 除外=${report.sitemap.preview.excluded}, noindex=${report.sitemap.preview.noindex}`,
-    `- archived: 出力ルート ${report.sitemap.archived.outputRoutes}, sitemap URL ${report.sitemap.archived.sitemapUrls}`,
     `- 原本 sitemap: ${report.sitemap.archiveSitemap.status}`,
+    `- 原本 sitemap 未分類 retire: ${report.sitemap.archiveSitemap.unclassifiedRetireCount ?? 0}`,
+    `- 原本 sitemap 分類エラー合計: ${report.sitemap.archiveSitemap.classificationErrorCount ?? 0}`,
   );
   if (report.nonIntentionalDifferences.length) {
     lines.push("", "## 非意図差分", "");
@@ -262,7 +325,7 @@ function markdownReport(report) {
       lines.push(`- \`${difference.path}\` \`${difference.item}\``);
   }
   lines.push("", "## 意図差分台帳", "");
-  for (const entry of report.intentionalRegistry.entries) {
+  for (const entry of Array.isArray(report.intentionalRegistry?.entries) ? report.intentionalRegistry.entries : []) {
     lines.push(`- \`${entry.path}\` \`${entry.item}\`: ${entry.reason}`);
   }
   if (report.newAdditions.length) {
@@ -277,10 +340,11 @@ function markdownReport(report) {
 
 async function main() {
   if (!(await stat(outDirectory)).isDirectory()) throw new Error(`out がありません: ${outDirectory}`);
-  const [htmlPaths, aliases, intentionalRegistry, archivePages] = await Promise.all([
+  const [htmlPaths, aliases, intentionalRegistry, contractConfig, archivePages] = await Promise.all([
     findIndexHtml(outDirectory),
     loadAliases(),
     readJson(intentionalDiffsPath),
+    readJson(contractConfigPath),
     loadArchivePages(),
   ]);
   const pages = await Promise.all(
@@ -295,9 +359,43 @@ async function main() {
   const differences = [];
   const newAdditions = [];
   const missingArchive = [];
+  const trailingSlash = trailingSlashFor(contractConfig);
+  const outputPaths = new Set(pages.map((page) => page.path));
+  const contractErrors = [
+    ...validateContractConfig(contractConfig).map((message) => ({ path: "/", item: "contract.config", message })),
+    ...validateIntentionalDiffRegistry(intentionalRegistry).map((message) => ({
+      path: "/",
+      item: "intentionalRegistry.config",
+      message,
+    })),
+    ...collectSocialImageEvidenceErrors(contractConfig),
+  ];
   for (const page of pages) {
     const sourcePath = aliases[page.path] ?? page.path;
     const sourceHtml = await archiveHtml(archivePages, sourcePath);
+    if (!ERROR_ROUTES.has(page.path)) {
+      contractErrors.push(
+        ...collectRouteFamilyCoverageErrors({ path: page.path, config: contractConfig }),
+        ...exactTrailingSlashErrors({
+          route: page.path,
+          metadata: page.metadata,
+          siteOrigin: siteUrl.origin,
+          trailingSlash,
+        }),
+        ...collectRequiredFieldErrors({ path: page.path, metadata: page.metadata, config: contractConfig }),
+        ...collectExpectedValueErrors({ path: page.path, metadata: page.metadata, config: contractConfig }),
+        ...collectEqualityErrors({ path: page.path, metadata: page.metadata, config: contractConfig }),
+        ...collectSocialMetadataFormatErrors({ path: page.path, metadata: page.metadata }),
+        ...publicUrlErrors(page.path, page.metadata),
+        ...collectInternalHrefErrors({
+          sourcePath: page.path,
+          hrefs: page.metadata.hrefs,
+          outputPaths,
+          siteOrigin: siteUrl.origin,
+          trailingSlash,
+        }),
+      );
+    }
     if (!sourceHtml) {
       missingArchive.push(page.path);
       for (const [item, actual] of Object.entries(page.metadata.values))
@@ -313,18 +411,6 @@ async function main() {
       const normalizedActual = comparable(item, actual);
       if (actual === undefined || normalizedExpected !== normalizedActual) {
         differences.push({ path: page.path, sourcePath, item, expected, actual, normalizedExpected, normalizedActual });
-      }
-      if (actual !== undefined) {
-        const message = absoluteOriginError(item, actual);
-        if (message)
-          differences.push({
-            path: page.path,
-            sourcePath,
-            item: `${item}.absoluteOrigin`,
-            expected: siteUrl.origin,
-            actual,
-            message,
-          });
       }
     }
     for (const [item, actual] of Object.entries(page.metadata.values)) {
@@ -366,12 +452,20 @@ async function main() {
 
   const sitemapXml = await readFile(join(outDirectory, "sitemap.xml"), "utf8");
   const sitemapUrls = sitemapLocations(sitemapXml);
-  const sitemapPaths = new Set(sitemapUrls.map((url) => normalizePath(new URL(url, siteUrl).pathname)));
+  const sitemapPaths = new Set(sitemapUrls.map((url) => normalizeLookupPath(new URL(url, siteUrl).pathname)));
+  const sitemapPublicPaths = new Set(sitemapUrls.map((url) => publicPath(url, siteUrl.origin)));
+  const outputPublicPaths = new Set(pages.map((page) => expectedPublicPathForLookup(page.path, trailingSlash)));
+  const sitemapPublicPathErrors = sitemapUrls.flatMap((url) => {
+    const lookupPath = normalizeLookupPath(new URL(url, siteUrl).pathname);
+    const expected = expectedPublicPathForLookup(lookupPath, trailingSlash);
+    const actual = publicPath(url, siteUrl.origin);
+    return actual === expected ? [] : [{ item: "sitemap.publicPath", path: lookupPath, expected, actual }];
+  });
   const expectedPaths = new Set(
     pages.flatMap((page) => {
       if (ERROR_ROUTES.has(page.path) || page.path === "/preview" || robotsNoindex(page.metadata)) return [];
       const canonical = canonicalPath(page.metadata);
-      return canonical && canonical !== page.path ? [] : [page.path];
+      return canonical && canonical === page.path ? [page.path] : [];
     }),
   );
   const excludedRoutes = pages.flatMap((page) => {
@@ -394,8 +488,10 @@ async function main() {
   });
   const movedErrors = Object.entries(aliases).flatMap(([currentPath, legacyPath]) => {
     const errors = [];
-    if (!sitemapPaths.has(currentPath)) errors.push(`${currentPath}: 新 URL がありません`);
-    if (sitemapPaths.has(legacyPath)) errors.push(`${legacyPath}: 旧 URL が残っています`);
+    const currentLookup = normalizeLookupPath(currentPath);
+    const legacyLookup = normalizeLookupPath(legacyPath);
+    if (!sitemapPaths.has(currentLookup)) errors.push(`${currentPath}: 新 URL がありません`);
+    if (sitemapPaths.has(legacyLookup)) errors.push(`${legacyPath}: 旧 URL が残っています`);
     return errors;
   });
   const preview = pages.find((page) => page.path === "/preview");
@@ -403,46 +499,90 @@ async function main() {
     excluded: !sitemapPaths.has("/preview"),
     noindex: Boolean(preview && robotsNoindex(preview.metadata)),
   };
-  const archived = {
-    outputRoutes: pages.filter((page) => page.path === "/archived" || page.path.startsWith("/archived/")).length,
-    sitemapUrls: [...sitemapPaths].filter((path) => path === "/archived" || path.startsWith("/archived/")).length,
-  };
-  const archiveSitemapFiles = await findXmlFiles(archiveDirectory);
+  const archiveSitemapFiles = (await findXmlFiles(archiveDirectory)).sort();
   let archiveSitemap;
+  let retiredRouteErrors = [];
+  let archiveSitemapLoadErrors = [];
   if (archiveSitemapFiles.length) {
-    const urls = sitemapLocations(await readFile(archiveSitemapFiles[0], "utf8"));
-    const paths = new Set(urls.map((url) => normalizePath(new URL(url, "https://www.example.com").pathname)));
+    const sitemapDocuments = await Promise.all(
+      archiveSitemapFiles.map(async (path) => ({ path, xml: await readFile(path, "utf8") })),
+    );
+    const urlsetDocuments = sitemapDocuments.filter(({ xml }) => /<urlset\b/i.test(xml));
+    const urls = [...new Set(urlsetDocuments.flatMap(({ xml }) => sitemapLocations(xml)))].sort();
+    const archivePublicPaths = new Set(urls.map((url) => publicPath(url, "https://www.example.com")));
+    const paths = new Set(urls.map((url) => normalizeLookupPath(new URL(url, "https://www.example.com").pathname)));
+    if (urlsetDocuments.length === 0) {
+      archiveSitemapLoadErrors = [
+        {
+          item: "archiveSitemap.indexChildrenMissing",
+          path: "/",
+          message: "sitemap XML は見つかりましたが、保存済みurlsetがありません",
+        },
+      ];
+    }
+    retiredRouteErrors = collectRetiredRouteErrors({
+      archivePaths: archivePublicPaths,
+      outputPaths,
+      sitemapPaths,
+      outputPublicPaths,
+      sitemapPublicPaths,
+      aliases,
+      config: contractConfig,
+      trailingSlash,
+    });
     archiveSitemap = {
-      status: "found",
-      path: relative(project, archiveSitemapFiles[0]),
+      status: urlsetDocuments.length ? "found" : "index-only",
+      paths: archiveSitemapFiles.map((path) => relative(project, path)),
       urlCount: urls.length,
       missingFromNew: [...paths].filter((path) => !sitemapPaths.has(path)).sort(),
       addedInNew: [...sitemapPaths].filter((path) => !paths.has(path)).sort(),
+      urlShapeChanges: [...archivePublicPaths]
+        .flatMap((source) => {
+          const lookup = normalizeLookupPath(source);
+          const target = expectedPublicPathForLookup(lookup, trailingSlash);
+          return source !== target && outputPublicPaths.has(target) && sitemapPublicPaths.has(target)
+            ? [{ source, target }]
+            : [];
+        })
+        .sort((left, right) => left.source.localeCompare(right.source)),
+      unclassifiedRetireCount: retiredRouteErrors.filter((error) => error.item === "archiveSitemap.unclassifiedRetire")
+        .length,
+      classificationErrorCount: retiredRouteErrors.length,
     };
   } else {
     archiveSitemap = { status: "not-found", message: "_scratch/archive-full 内に sitemap XML はありません" };
+    archiveSitemapLoadErrors = archiveSitemapMissingErrors(contractConfig);
   }
   const sitemapErrors = [
     ...missing.map((path) => ({ item: "sitemap.missing", path })),
     ...extra.map((path) => ({ item: "sitemap.extra", path })),
+    ...sitemapPublicPathErrors,
     ...originErrors.map((url) => ({ item: "sitemap.origin", path: new URL(url, siteUrl).pathname, actual: url })),
     ...movedErrors.map((message) => ({ item: "sitemap.moved", path: "/", message })),
+    ...archiveSitemapLoadErrors,
+    ...retiredRouteErrors,
     ...(!previewStatus.excluded
       ? [{ item: "sitemap.preview", path: "/preview", message: "sitemap に含まれています" }]
       : []),
     ...(!previewStatus.noindex
       ? [{ item: "preview.robots", path: "/preview", message: "noindex ではありません" }]
       : []),
-    ...(archived.outputRoutes || archived.sitemapUrls
-      ? [{ item: "archived.exclusion", path: "/archived", actual: archived }]
-      : []),
+    ...contractErrors,
   ];
 
-  const intentionalDifferences = differences.filter((difference) =>
-    isIntentional(intentionalRegistry.entries, difference),
-  );
+  const intentionalEntries = Array.isArray(intentionalRegistry?.entries) ? intentionalRegistry.entries : [];
+  const intentionalDifferences = differences.filter((difference) => isIntentional(intentionalEntries, difference));
+  const unusedIntentionalEntries = intentionalEntries
+    .filter((entry) => !differences.some((difference) => intentionalDiffMatches(entry, difference)))
+    .map((entry) => ({
+      path: typeof entry?.path === "string" ? entry.path : "/",
+      item: "intentionalRegistry.unused",
+      actual: entry?.item,
+      message: "登録した意図差分に対応する観測差分がありません",
+    }));
   const nonIntentionalDifferences = [
-    ...differences.filter((difference) => !isIntentional(intentionalRegistry.entries, difference)),
+    ...differences.filter((difference) => !isIntentional(intentionalEntries, difference)),
+    ...unusedIntentionalEntries,
     ...sitemapErrors,
   ];
   const report = {
@@ -465,6 +605,7 @@ async function main() {
       nonIntentional: nonIntentionalDifferences.length,
       intentional: intentionalDifferences.length,
       additions: newAdditions.length,
+      contractErrors: contractErrors.length,
       mismatchesByItem: differenceCounts(differences),
       nonIntentionalByItem: differenceCounts(nonIntentionalDifferences),
       intentionalByItem: differenceCounts(intentionalDifferences),
@@ -478,7 +619,6 @@ async function main() {
       movedCount: Object.keys(aliases).length,
       movedErrors,
       preview: previewStatus,
-      archived,
       excludedRoutes,
       archiveSitemap,
     },

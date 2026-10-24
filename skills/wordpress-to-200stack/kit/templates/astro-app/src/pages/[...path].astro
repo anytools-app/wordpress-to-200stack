@@ -1,0 +1,23 @@
+---
+import type { GetStaticPaths } from "astro";
+import SiteLayout from "../layouts/SiteLayout.astro";
+import DocumentView from "../components/DocumentView";
+import { ContentRepository } from "../lib/repository";
+import type { LegacyDocument } from "../lib/content/types";
+
+export const getStaticPaths = (async () => {
+  const repository = await ContentRepository.load();
+  return repository.allDocuments().map((document) => {
+    const path = document.route.path.replace(/^\/|\/$/g, "");
+    if (!path || ["preview", "404", "robots.txt", "sitemap.xml"].includes(path)) {
+      throw new Error(`予約済みルートとCMSルートが衝突しています: ${document.route.path}`);
+    }
+    return { params: { path }, props: { document } };
+  });
+}) satisfies GetStaticPaths;
+interface Props { document: LegacyDocument; }
+const { document } = Astro.props;
+---
+<SiteLayout title={document.seo?.title || document.content.title} description={document.seo?.description || document.content.excerpt} canonical={document.route.path} noindex={document.seo?.noindex}>
+  <main><DocumentView document={document} /></main>
+</SiteLayout>
